@@ -14,6 +14,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<VaultOptions>(builder.Configuration.GetSection("Vault"));
+builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notifications"));
 builder.Services.PostConfigure<VaultOptions>(options =>
 {
     var baseVault = Path.Combine(builder.Environment.ContentRootPath, "Vault");
@@ -24,9 +25,23 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
-builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
+builder.Services.AddSingleton<IUserDirectoryService, ConfigurationUserDirectoryService>();
+builder.Services.AddSingleton<ConsoleNotificationService>();
+builder.Services.AddSingleton<EmailNotificationService>();
+builder.Services.AddHttpClient<TeamsNotificationService>();
+builder.Services.AddSingleton<INotificationService>(sp =>
+{
+    var options = sp.GetRequiredService<IOptions<NotificationOptions>>().Value;
+    return options.Channel switch
+    {
+        NotificationChannel.Email => sp.GetRequiredService<EmailNotificationService>(),
+        NotificationChannel.Teams => sp.GetRequiredService<TeamsNotificationService>(),
+        _ => sp.GetRequiredService<ConsoleNotificationService>()
+    };
+});
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
 
 var app = builder.Build();
