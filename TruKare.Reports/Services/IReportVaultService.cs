@@ -18,4 +18,10 @@ public interface IReportVaultService
     Task FinalizeAsync(FinalizeRequest request, CancellationToken cancellationToken);
 
     IEnumerable<AuditEvent> GetAuditTrail(Guid reportId);
+
+    DashboardSummaryResponse GetDashboardSummary();
+
+    IEnumerable<FileIssueSummary> GetConflicts();
+
+    IEnumerable<FileIssueSummary> GetOrphans();
 }

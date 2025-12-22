@@ -12,6 +12,8 @@ public interface IReportRepository
 
     ReportLock? GetLock(Guid reportId);
 
+    IEnumerable<ReportLock> GetLocks();
+
     void SaveLock(ReportLock? reportLock);
 
     void RemoveLock(Guid reportId);
