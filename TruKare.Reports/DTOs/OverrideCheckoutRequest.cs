@@ -8,9 +8,6 @@ public class OverrideCheckoutRequest
     public Guid ReportId { get; set; }
 
     [Required]
-    public string AdminUser { get; set; } = string.Empty;
-
-    [Required]
     public string Host { get; set; } = string.Empty;
 
     [Required]

@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using TruKare.Reports.Models;
+using TruKare.Reports.Middleware;
 using TruKare.Reports.Options;
 using TruKare.Reports.Repositories;
 using TruKare.Reports.Services;
@@ -24,9 +25,11 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
+builder.Services.AddSingleton<IUserContext, HttpContextUserContext>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
 
 var app = builder.Build();
@@ -41,6 +44,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.UseMiddleware<CanonicalUserMiddleware>();
 
 app.UseAuthorization();
 

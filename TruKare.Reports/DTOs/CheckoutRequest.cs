@@ -8,9 +8,6 @@ public class CheckoutRequest
     public Guid ReportId { get; set; }
 
     [Required]
-    public string User { get; set; } = string.Empty;
-
-    [Required]
     public string Host { get; set; } = string.Empty;
 
     public bool IsAdmin { get; set; }

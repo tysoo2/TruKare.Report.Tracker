@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Linq;
 using Microsoft.Extensions.Options;
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Models;
@@ -13,17 +14,20 @@ public class ReportVaultService : IReportVaultService
     private readonly VaultOptions _options;
     private readonly IHashService _hashService;
     private readonly INotificationService _notificationService;
+    private readonly IUserContext _userContext;
 
     public ReportVaultService(
         IReportRepository repository,
         IOptions<VaultOptions> options,
         IHashService hashService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IUserContext userContext)
     {
         _repository = repository;
         _hashService = hashService;
         _notificationService = notificationService;
         _options = options.Value;
+        _userContext = userContext;
     }
 
     public IEnumerable<Report> SearchReports(SearchReportsRequest request)
@@ -54,8 +58,9 @@ public class ReportVaultService : IReportVaultService
         EnsureDirectories();
         EnsureCanonicalExists(report);
 
+        var currentUser = _userContext.GetCurrentUser();
         var existingLock = _repository.GetLock(report.ReportId);
-        if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, request.User, StringComparison.OrdinalIgnoreCase))
+        if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, currentUser, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Report is locked by {existingLock.LockedBy} since {existingLock.LockedAt:g}.");
         }
@@ -68,7 +73,7 @@ public class ReportVaultService : IReportVaultService
         {
             ReportId = report.ReportId,
             LockedAt = DateTime.UtcNow,
-            LockedBy = request.User,
+            LockedBy = currentUser,
             LockedFromHost = request.Host,
             LockState = LockState.Active
         };
@@ -79,14 +84,14 @@ public class ReportVaultService : IReportVaultService
         {
             SessionId = sessionId,
             ReportId = report.ReportId,
-            User = request.User,
+            User = currentUser,
             LocalPath = localPath,
             BaseHash = baseHash,
             StartedAt = DateTime.UtcNow
         };
 
         _repository.SaveSession(session);
-        AppendAudit(report.ReportId, request.User, "Checkout", new { request.Host, request.IsAdmin });
+        AppendAudit(report.ReportId, currentUser, "Checkout", new { request.Host, request.IsAdmin });
 
         return new CheckoutResponse
         {
@@ -103,12 +108,13 @@ public class ReportVaultService : IReportVaultService
         EnsureDirectories();
         EnsureCanonicalExists(report);
 
+        var adminUser = _userContext.GetCurrentUser();
         var existingLock = _repository.GetLock(report.ReportId);
         if (existingLock != null && existingLock.LockState == LockState.Active)
         {
             existingLock.LockState = LockState.Overridden;
             existingLock.OverrideReason = request.Reason;
-            existingLock.OverriddenBy = request.AdminUser;
+            existingLock.OverriddenBy = adminUser;
             existingLock.OverriddenAt = DateTime.UtcNow;
             _repository.SaveLock(existingLock);
 
@@ -120,16 +126,15 @@ public class ReportVaultService : IReportVaultService
                 _repository.SaveSession(session);
             }
 
-            var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {request.AdminUser}. Reason: {request.Reason}";
+            var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {adminUser}. Reason: {request.Reason}";
             await _notificationService.NotifyAsync(existingLock.LockedBy, "Lock overridden", notifyMessage, cancellationToken);
-            AppendAudit(report.ReportId, request.AdminUser, "OverrideCheckout", new { request.Host, request.Reason, existingLock.LockedBy });
+            AppendAudit(report.ReportId, adminUser, "OverrideCheckout", new { request.Host, request.Reason, existingLock.LockedBy });
         }
 
         var checkoutRequest = new CheckoutRequest
         {
             Host = request.Host,
             ReportId = request.ReportId,
-            User = request.AdminUser,
             IsAdmin = true,
             OverrideReason = request.Reason
         };
@@ -142,8 +147,9 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
-        if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, request.User, StringComparison.OrdinalIgnoreCase)))
+        if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, currentUser, StringComparison.OrdinalIgnoreCase)))
         {
             await PreserveConflictCopyAsync(session, report);
             throw new InvalidOperationException($"This report was overridden by {reportLock?.OverriddenBy}. Your copy is stale.");
@@ -157,7 +163,7 @@ public class ReportVaultService : IReportVaultService
             CompleteSession(session, SessionEndReason.NoChanges);
             ReleaseLock(report.ReportId);
             DeleteWorkspace(session.LocalPath);
-            AppendAudit(report.ReportId, request.User, "NoChangeCheckin", new { session.SessionId });
+            AppendAudit(report.ReportId, currentUser, "NoChangeCheckin", new { session.SessionId });
             return;
         }
 
@@ -168,14 +174,14 @@ public class ReportVaultService : IReportVaultService
         report.CurrentRevision = previousRevision + 1;
         report.CurrentHash = _hashService.ComputeHash(report.CanonicalPath);
         report.LastModifiedAt = DateTime.UtcNow;
-        report.LastModifiedBy = request.User;
+        report.LastModifiedBy = currentUser;
         _repository.UpsertReport(report);
 
         CompleteSession(session, SessionEndReason.CheckedIn);
         ReleaseLock(report.ReportId);
         DeleteWorkspace(session.LocalPath);
 
-        AppendAudit(report.ReportId, request.User, "Checkin", new { session.SessionId, revision = report.CurrentRevision });
+        AppendAudit(report.ReportId, currentUser, "Checkin", new { session.SessionId, revision = report.CurrentRevision });
     }
 
     public async Task FinalizeAsync(FinalizeRequest request, CancellationToken cancellationToken)
@@ -183,15 +189,16 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
-        if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, request.User, StringComparison.OrdinalIgnoreCase))
+        if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, currentUser, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("You must hold the active lock to finalize.");
         }
 
         EnsureFileClosed(session.LocalPath);
 
-        var finalizeCheckin = new CheckinRequest { SessionId = request.SessionId, User = request.User };
+        var finalizeCheckin = new CheckinRequest { SessionId = request.SessionId };
         await CheckinAsync(finalizeCheckin, cancellationToken);
 
         var finalDirectory = _options.FinalRoot;
@@ -204,9 +211,9 @@ public class ReportVaultService : IReportVaultService
         report.FinalPath = finalPath;
         report.Status = ReportStatus.Done;
         report.LastModifiedAt = DateTime.UtcNow;
-        report.LastModifiedBy = request.User;
+        report.LastModifiedBy = currentUser;
         _repository.UpsertReport(report);
-        AppendAudit(report.ReportId, request.User, "Finalize", new { finalPath });
+        AppendAudit(report.ReportId, currentUser, "Finalize", new { finalPath });
     }
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
