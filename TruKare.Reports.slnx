@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="TruKare.Reports/TruKare.Reports.csproj" />
+  <Project Path="TruKare.Reports.Tests/TruKare.Reports.Tests.csproj" />
 </Solution>
