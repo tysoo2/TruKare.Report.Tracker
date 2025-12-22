@@ -14,6 +14,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<VaultOptions>(builder.Configuration.GetSection("Vault"));
+builder.Services.Configure<AccessControlOptions>(builder.Configuration.GetSection("AccessControl"));
 builder.Services.PostConfigure<VaultOptions>(options =>
 {
     var baseVault = Path.Combine(builder.Environment.ContentRootPath, "Vault");

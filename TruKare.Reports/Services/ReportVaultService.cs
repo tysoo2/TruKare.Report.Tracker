@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TruKare.Reports.DTOs;
@@ -13,17 +15,20 @@ public class ReportVaultService : IReportVaultService
     private readonly VaultOptions _options;
     private readonly IHashService _hashService;
     private readonly INotificationService _notificationService;
+    private readonly AccessControlOptions _accessControlOptions;
 
     public ReportVaultService(
         IReportRepository repository,
         IOptions<VaultOptions> options,
         IHashService hashService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IOptions<AccessControlOptions> accessControlOptions)
     {
         _repository = repository;
         _hashService = hashService;
         _notificationService = notificationService;
         _options = options.Value;
+        _accessControlOptions = accessControlOptions.Value;
     }
 
     public IEnumerable<Report> SearchReports(SearchReportsRequest request)
@@ -206,7 +211,17 @@ public class ReportVaultService : IReportVaultService
         report.LastModifiedAt = DateTime.UtcNow;
         report.LastModifiedBy = request.User;
         _repository.UpsertReport(report);
+        var aclOutcome = ApplyFinalAccessControls(finalPath);
+        EnsureCanonicalIsWritable(report.CanonicalPath);
         AppendAudit(report.ReportId, request.User, "Finalize", new { finalPath });
+        AppendAudit(report.ReportId, request.User, "AclApplied", new
+        {
+            target = finalPath,
+            applied = aclOutcome.ExplicitRulesApplied,
+            readOnlyApplied = aclOutcome.ReadOnlyFlagApplied,
+            allowedWriters = _accessControlOptions.FinalWriteIdentities,
+            error = aclOutcome.ErrorMessage
+        });
     }
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
@@ -330,5 +345,76 @@ public class ReportVaultService : IReportVaultService
             Timestamp = DateTime.UtcNow,
             Details = payload
         });
+    }
+
+    private AccessControlOutcome ApplyFinalAccessControls(string path)
+    {
+        var allowedWriters = _accessControlOptions.FinalWriteIdentities ?? [];
+        var outcome = new AccessControlOutcome();
+
+        try
+        {
+            var security = File.GetAccessControl(path);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(NTAccount)))
+            {
+                security.RemoveAccessRule(rule);
+            }
+
+            foreach (var identity in allowedWriters.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var accessRule = new FileSystemAccessRule(
+                    identity,
+                    FileSystemRights.Modify | FileSystemRights.ReadAndExecute | FileSystemRights.Write | FileSystemRights.Read,
+                    AccessControlType.Allow);
+                security.AddAccessRule(accessRule);
+            }
+
+            File.SetAccessControl(path, security);
+            outcome.ExplicitRulesApplied = true;
+        }
+        catch (Exception ex)
+        {
+            outcome.ErrorMessage = ex.Message;
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            File.SetAttributes(path, attributes | FileAttributes.ReadOnly);
+            outcome.ReadOnlyFlagApplied = true;
+        }
+        catch (Exception ex)
+        {
+            outcome.ErrorMessage = string.IsNullOrWhiteSpace(outcome.ErrorMessage)
+                ? ex.Message
+                : $"{outcome.ErrorMessage}; {ex.Message}";
+        }
+
+        return outcome;
+    }
+
+    private void EnsureCanonicalIsWritable(string canonicalPath)
+    {
+        if (!File.Exists(canonicalPath))
+        {
+            return;
+        }
+
+        var attributes = File.GetAttributes(canonicalPath);
+        if (attributes.HasFlag(FileAttributes.ReadOnly))
+        {
+            File.SetAttributes(canonicalPath, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    private sealed class AccessControlOutcome
+    {
+        public bool ExplicitRulesApplied { get; set; }
+
+        public bool ReadOnlyFlagApplied { get; set; }
+
+        public string? ErrorMessage { get; set; }
     }
 }
