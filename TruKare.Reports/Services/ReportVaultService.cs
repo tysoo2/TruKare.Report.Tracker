@@ -341,29 +341,32 @@ public class ReportVaultService : IReportVaultService
 
     private void EnsureCanonicalExists(Report report)
     {
-        if (File.Exists(report.CanonicalPath))
+        var canonicalPath = GetCanonicalPath(report);
+        if (File.Exists(canonicalPath))
         {
             return;
         }
 
-        Directory.CreateDirectory(Path.GetDirectoryName(report.CanonicalPath)!);
-        File.WriteAllText(report.CanonicalPath, $"Seed content for {report.ReportType} - {report.CustomerName} ({report.UnitNumber})");
-        report.CurrentHash = _hashService.ComputeHash(report.CanonicalPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(canonicalPath)!);
+        File.WriteAllText(canonicalPath, $"Seed content for {report.ReportType} - {report.CustomerName} ({report.UnitNumber})");
+        report.CurrentHash = _hashService.ComputeHash(canonicalPath);
         _repository.UpsertReport(report);
     }
 
     private string PrepareWorkspaceCopy(Report report, Guid sessionId)
     {
+        var canonicalPath = GetCanonicalPath(report);
         var workspaceDirectory = Path.Combine(_options.WorkspaceRoot, report.ReportId.ToString(), sessionId.ToString());
         Directory.CreateDirectory(workspaceDirectory);
-        var localPath = Path.Combine(workspaceDirectory, Path.GetFileName(report.CanonicalPath));
-        File.Copy(report.CanonicalPath, localPath, overwrite: true);
+        var localPath = Path.Combine(workspaceDirectory, Path.GetFileName(canonicalPath));
+        File.Copy(canonicalPath, localPath, overwrite: true);
         return localPath;
     }
 
     private void ArchivePreviousVersion(Report report, int previousRevision)
     {
-        if (string.IsNullOrWhiteSpace(_options.ArchiveRoot) || !File.Exists(report.CanonicalPath))
+        var canonicalPath = GetCanonicalPath(report);
+        if (string.IsNullOrWhiteSpace(_options.ArchiveRoot) || !File.Exists(canonicalPath))
         {
             return;
         }
@@ -371,9 +374,9 @@ public class ReportVaultService : IReportVaultService
         var archiveFolder = Path.Combine(_options.ArchiveRoot, report.ReportId.ToString());
         Directory.CreateDirectory(archiveFolder);
         var revisionLabel = previousRevision.ToString("D4");
-        var archivedName = $"{Path.GetFileNameWithoutExtension(report.CanonicalPath)}_rev{revisionLabel}{Path.GetExtension(report.CanonicalPath)}";
+        var archivedName = $"{Path.GetFileNameWithoutExtension(canonicalPath)}_rev{revisionLabel}{Path.GetExtension(canonicalPath)}";
         var archivePath = Path.Combine(archiveFolder, archivedName);
-        File.Copy(report.CanonicalPath, archivePath, overwrite: true);
+        File.Copy(canonicalPath, archivePath, overwrite: true);
     }
 
     private void AtomicReplace(string targetPath, string sourcePath)

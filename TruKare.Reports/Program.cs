@@ -11,6 +11,7 @@ using TruKare.Reports.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+var connectionString = builder.Configuration.GetConnectionString("Reports");
 
 builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
     .AddNegotiate();
@@ -58,6 +59,13 @@ builder.Services.AddHostedService<LockPolicyBackgroundService>();
 
 var app = builder.Build();
 
+if (!string.IsNullOrWhiteSpace(connectionString))
+{
+    var loggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+    var logger = loggerFactory.CreateLogger("DatabaseMigrator");
+    DatabaseMigrator.UpgradeDatabase(connectionString, logger);
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -73,8 +81,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-
-SeedVault(app.Services, app.Environment.ContentRootPath);
 
 app.Run();
 
