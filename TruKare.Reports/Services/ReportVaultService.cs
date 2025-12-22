@@ -153,7 +153,7 @@ public class ReportVaultService : IReportVaultService
 
         if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, userContext.UserName, StringComparison.OrdinalIgnoreCase)))
         {
-            await PreserveConflictCopyAsync(session, report);
+            await PreserveConflictCopyAsync(session, report, cancellationToken);
             throw new InvalidOperationException($"This report was overridden by {reportLock?.OverriddenBy}. Your copy is stale.");
         }
 
@@ -314,7 +314,7 @@ public class ReportVaultService : IReportVaultService
         }
     }
 
-    private async Task PreserveConflictCopyAsync(CheckoutSession session, Report report)
+    private async Task PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.ConflictsRoot) || !File.Exists(session.LocalPath))
         {
@@ -326,7 +326,7 @@ public class ReportVaultService : IReportVaultService
         var conflictName = $"{Path.GetFileNameWithoutExtension(session.LocalPath)}_{DateTime.UtcNow:yyyyMMddHHmmss}{Path.GetExtension(session.LocalPath)}";
         var conflictPath = Path.Combine(conflictFolder, conflictName);
         File.Copy(session.LocalPath, conflictPath, overwrite: true);
-        await _notificationService.NotifyAsync(session.User, "Stale copy quarantined", $"A stale copy was preserved at {conflictPath}", CancellationToken.None);
+        await _notificationService.NotifyAsync(session.User, "Stale copy quarantined", $"A stale copy was preserved at {conflictPath}", cancellationToken);
     }
 
     private void AppendAudit(Guid reportId, string actor, string action, object details)
