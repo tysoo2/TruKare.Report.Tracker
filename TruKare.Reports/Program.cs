@@ -1,4 +1,7 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.Models;
 using TruKare.Reports.Options;
 using TruKare.Reports.Repositories;
@@ -7,6 +10,25 @@ using TruKare.Reports.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+
+builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate();
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.AddPolicy(AdminPolicies.AdminGroup, policy =>
+    {
+        policy.Requirements.Add(new AdminGroupRequirement());
+    });
+});
+builder.Services.AddScoped<IAuthorizationHandler, AdminGroupHandler>();
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
+builder.Services.AddScoped<IAdminGroupValidator, WindowsAdminGroupValidator>();
+builder.Services.AddScoped<IUserContextAccessor, HttpContextUserContextAccessor>();
+builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -25,7 +47,7 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
-builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
+builder.Services.AddSingleton<IReportRepository, PostgresReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
 builder.Services.AddSingleton<IAdminAuthorizationService, AdminAuthorizationService>();
@@ -44,6 +66,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

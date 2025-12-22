@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
@@ -7,16 +7,17 @@ using TruKare.Reports.Services;
 namespace TruKare.Reports.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("reports")]
 public class ReportsController : ControllerBase
 {
     private readonly IReportVaultService _reportVaultService;
-    private readonly IAdminAuthorizationService _adminAuthorizationService;
+    private readonly IUserContextAccessor _userContextAccessor;
 
-    public ReportsController(IReportVaultService reportVaultService, IAdminAuthorizationService adminAuthorizationService)
+    public ReportsController(IReportVaultService reportVaultService, IUserContextAccessor userContextAccessor)
     {
         _reportVaultService = reportVaultService;
-        _adminAuthorizationService = adminAuthorizationService;
+        _userContextAccessor = userContextAccessor;
     }
 
     [HttpGet]
@@ -36,30 +37,25 @@ public class ReportsController : ControllerBase
     [HttpPost("checkout")]
     public async Task<IActionResult> Checkout([FromBody] CheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.CheckoutAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.CheckoutAsync(request, userContext, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("override-checkout")]
-    [RequireAdmin]
+    [Authorize(Policy = AdminPolicies.AdminGroup)]
     public async Task<IActionResult> OverrideCheckout([FromBody] OverrideCheckoutRequest request, CancellationToken cancellationToken)
     {
-        try
-        {
-            request.AdminUser = _adminAuthorizationService.GetCurrentAdminUser(HttpContext);
-            var response = await _reportVaultService.OverrideCheckoutAsync(request, cancellationToken);
-            return Ok(response);
-        }
-        catch (AdminAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ErrorResponse.Forbidden(ex.Message));
-        }
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.OverrideCheckoutAsync(request, userContext, cancellationToken);
+        return Ok(response);
     }
 
     [HttpPost("checkin")]
     public async Task<IActionResult> Checkin([FromBody] CheckinRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.CheckinAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.CheckinAsync(request, userContext, cancellationToken);
         return Ok();
     }
 
@@ -67,16 +63,9 @@ public class ReportsController : ControllerBase
     [RequireAdmin]
     public async Task<IActionResult> Finalize([FromBody] FinalizeRequest request, CancellationToken cancellationToken)
     {
-        try
-        {
-            request.User = _adminAuthorizationService.GetCurrentAdminUser(HttpContext);
-            await _reportVaultService.FinalizeAsync(request, cancellationToken);
-            return Ok();
-        }
-        catch (AdminAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, ErrorResponse.Forbidden(ex.Message));
-        }
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.FinalizeAsync(request, userContext, cancellationToken);
+        return Ok();
     }
 
     [HttpGet("{id:guid}/audit")]
