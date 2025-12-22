@@ -74,4 +74,25 @@ public class ReportsController : ControllerBase
         var audit = _reportVaultService.GetAuditTrail(id);
         return Ok(audit);
     }
+
+    [HttpGet("dashboard")]
+    public IActionResult GetDashboard()
+    {
+        var summary = _reportVaultService.GetDashboardSummary();
+        return Ok(summary);
+    }
+
+    [HttpGet("conflicts")]
+    public IActionResult ListConflicts()
+    {
+        var issues = _reportVaultService.GetConflicts();
+        return Ok(issues);
+    }
+
+    [HttpGet("orphans")]
+    public IActionResult ListOrphans()
+    {
+        var issues = _reportVaultService.GetOrphans();
+        return Ok(issues);
+    }
 }

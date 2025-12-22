@@ -44,6 +44,7 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.FinalRoot = string.IsNullOrWhiteSpace(options.FinalRoot) ? Path.Combine(baseVault, "Final") : options.FinalRoot;
     options.ArchiveRoot = string.IsNullOrWhiteSpace(options.ArchiveRoot) ? Path.Combine(baseVault, "Archive") : options.ArchiveRoot;
     options.ConflictsRoot = string.IsNullOrWhiteSpace(options.ConflictsRoot) ? Path.Combine(baseVault, "Conflicts") : options.ConflictsRoot;
+    options.OrphansRoot = string.IsNullOrWhiteSpace(options.OrphansRoot) ? Path.Combine(baseVault, "Orphans") : options.OrphansRoot;
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
@@ -89,6 +90,7 @@ static void SeedVault(IServiceProvider services, string contentRoot)
     configured.FinalRoot = string.IsNullOrWhiteSpace(configured.FinalRoot) ? Path.Combine(baseVault, "Final") : configured.FinalRoot;
     configured.ArchiveRoot = string.IsNullOrWhiteSpace(configured.ArchiveRoot) ? Path.Combine(baseVault, "Archive") : configured.ArchiveRoot;
     configured.ConflictsRoot = string.IsNullOrWhiteSpace(configured.ConflictsRoot) ? Path.Combine(baseVault, "Conflicts") : configured.ConflictsRoot;
+    configured.OrphansRoot = string.IsNullOrWhiteSpace(configured.OrphansRoot) ? Path.Combine(baseVault, "Orphans") : configured.OrphansRoot;
     configured.IntakeRoot = string.IsNullOrWhiteSpace(configured.IntakeRoot) ? Path.Combine(baseVault, "Intake") : configured.IntakeRoot;
     configured.WorkspaceRoot = string.IsNullOrWhiteSpace(configured.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : configured.WorkspaceRoot;
 
@@ -96,6 +98,7 @@ static void SeedVault(IServiceProvider services, string contentRoot)
     Directory.CreateDirectory(configured.FinalRoot);
     Directory.CreateDirectory(configured.ArchiveRoot);
     Directory.CreateDirectory(configured.ConflictsRoot);
+    Directory.CreateDirectory(configured.OrphansRoot);
     Directory.CreateDirectory(configured.IntakeRoot);
     Directory.CreateDirectory(configured.WorkspaceRoot);
 

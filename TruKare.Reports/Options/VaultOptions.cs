@@ -10,6 +10,8 @@ public class VaultOptions
 
     public string ConflictsRoot { get; set; } = string.Empty;
 
+    public string OrphansRoot { get; set; } = string.Empty;
+
     public string IntakeRoot { get; set; } = string.Empty;
 
     public string WorkspaceRoot { get; set; } = string.Empty;

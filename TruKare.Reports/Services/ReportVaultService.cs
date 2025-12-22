@@ -225,6 +225,77 @@ public class ReportVaultService : IReportVaultService
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
 
+    public DashboardSummaryResponse GetDashboardSummary()
+    {
+        var reports = _repository.GetReports().ToList();
+        var reportLookup = reports.ToDictionary(r => r.ReportId);
+        var activeLocks = _repository.GetLocks().Where(l => l.LockState == LockState.Active).ToList();
+        var locksByReportId = activeLocks
+            .GroupBy(l => l.ReportId)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(lockRecord => lockRecord.LockedAt).First());
+
+        var totals = new DashboardStatusCounts
+        {
+            InProgress = reports.Count(r => r.Status == ReportStatus.InProgress),
+            Done = reports.Count(r => r.Status == ReportStatus.Done),
+            Archived = reports.Count(r => r.Status == ReportStatus.Archived),
+            Locked = activeLocks.Count
+        };
+
+        IEnumerable<DashboardGroupBreakdown> BuildGrouped(Func<Report, string> keySelector)
+        {
+            return reports
+                .GroupBy(keySelector, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new DashboardGroupBreakdown
+                {
+                    Key = group.Key,
+                    InProgress = group.Count(r => r.Status == ReportStatus.InProgress),
+                    Done = group.Count(r => r.Status == ReportStatus.Done),
+                    Archived = group.Count(r => r.Status == ReportStatus.Archived),
+                    Locked = group.Count(r => locksByReportId.ContainsKey(r.ReportId))
+                })
+                .OrderByDescending(g => g.Locked)
+                .ThenByDescending(g => g.InProgress)
+                .ThenBy(g => g.Key)
+                .ToArray();
+        }
+
+        var byLockedBy = activeLocks
+            .GroupBy(l => l.LockedBy, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var statuses = group
+                    .Select(l => reportLookup.TryGetValue(l.ReportId, out var report) ? report.Status : (ReportStatus?)null)
+                    .Where(status => status.HasValue)
+                    .Select(status => status!.Value)
+                    .ToArray();
+
+                return new DashboardGroupBreakdown
+                {
+                    Key = group.Key,
+                    Locked = group.Count(),
+                    InProgress = statuses.Count(status => status == ReportStatus.InProgress),
+                    Done = statuses.Count(status => status == ReportStatus.Done),
+                    Archived = statuses.Count(status => status == ReportStatus.Archived)
+                };
+            })
+            .OrderByDescending(g => g.Locked)
+            .ThenBy(g => g.Key)
+            .ToArray();
+
+        return new DashboardSummaryResponse
+        {
+            Totals = totals,
+            ByCustomer = BuildGrouped(r => r.CustomerName),
+            ByUnit = BuildGrouped(r => r.UnitNumber),
+            ByLockedBy = byLockedBy
+        };
+    }
+
+    public IEnumerable<FileIssueSummary> GetConflicts() => GetFileIssues(_options.ConflictsRoot, "Conflict");
+
+    public IEnumerable<FileIssueSummary> GetOrphans() => GetFileIssues(_options.OrphansRoot, "Orphan");
+
     private void EnsureDirectories()
     {
         Directory.CreateDirectory(_options.CanonicalRoot);
@@ -236,6 +307,10 @@ public class ReportVaultService : IReportVaultService
         if (!string.IsNullOrWhiteSpace(_options.ConflictsRoot))
         {
             Directory.CreateDirectory(_options.ConflictsRoot);
+        }
+        if (!string.IsNullOrWhiteSpace(_options.OrphansRoot))
+        {
+            Directory.CreateDirectory(_options.OrphansRoot);
         }
         Directory.CreateDirectory(_options.WorkspaceRoot);
     }
