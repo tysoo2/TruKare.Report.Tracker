@@ -7,10 +7,5 @@ public class CheckoutRequest
     [Required]
     public Guid ReportId { get; set; }
 
-    [Required]
-    public string Host { get; set; } = string.Empty;
-
-    public bool IsAdmin { get; set; }
-
     public string? OverrideReason { get; set; }
 }
