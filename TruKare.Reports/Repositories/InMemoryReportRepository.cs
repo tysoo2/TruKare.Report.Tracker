@@ -14,6 +14,8 @@ public class InMemoryReportRepository : IReportRepository
 
     public Report? GetReport(Guid id) => _reports.TryGetValue(id, out var report) ? report : null;
 
+    public IEnumerable<ReportLock> GetLocks() => _locks.Values;
+
     public void UpsertReport(Report report)
     {
         _reports.AddOrUpdate(report.ReportId, report, (_, _) => report);
