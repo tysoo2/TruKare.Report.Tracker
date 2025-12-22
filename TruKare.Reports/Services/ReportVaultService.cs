@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -129,12 +130,31 @@ public class ReportVaultService : IReportVaultService
             existingLock.OverriddenAt = DateTime.UtcNow;
             _repository.SaveLock(existingLock);
 
+            string? conflictCopyPath = null;
             foreach (var session in _repository.GetSessions(report.ReportId))
             {
                 session.IsOverridden = true;
                 session.EndedAt = DateTime.UtcNow;
                 session.EndReason = SessionEndReason.OverrideByAdmin;
                 _repository.SaveSession(session);
+
+                conflictCopyPath ??= await PreserveConflictCopyAsync(session, report, cancellationToken);
+            }
+
+            var message = $"Lock holder: {existingLock.LockedBy} (since {existingLock.LockedAt:u}). " +
+                          $"Override reason: {request.Reason}. " +
+                          $"Conflict copy: {conflictCopyPath ?? "unavailable"}.";
+
+            var metadata = new Dictionary<string, string>
+            {
+                ["lockedBy"] = existingLock.LockedBy,
+                ["lockedAtUtc"] = existingLock.LockedAt.ToString("u"),
+                ["overrideReason"] = request.Reason
+            };
+
+            if (conflictCopyPath is not null)
+            {
+                metadata["conflictCopyPath"] = conflictCopyPath;
             }
 
             var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {userContext.UserName}. Reason: {request.Reason}";
@@ -401,7 +421,7 @@ public class ReportVaultService : IReportVaultService
     {
         if (string.IsNullOrWhiteSpace(_options.ConflictsRoot) || !File.Exists(session.LocalPath))
         {
-            return;
+            return null;
         }
 
         var conflictFolder = Path.Combine(_options.ConflictsRoot, session.User, report.ReportId.ToString());
