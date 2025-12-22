@@ -1,0 +1,37 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    displayName: "Setup .NET SDK"
+    inputs:
+      packageType: "sdk"
+      version: "10.0.x"
+      includePreview: true
+
+  - script: dotnet restore TruKare.Reports.Tests/TruKare.Reports.Tests.csproj
+    displayName: "Restore"
+
+  - script: |
+      dotnet build TruKare.Reports/TruKare.Reports.csproj --configuration Release --no-restore
+      dotnet build TruKare.Reports.Tests/TruKare.Reports.Tests.csproj --configuration Release --no-restore
+    displayName: "Build"
+
+  - script: |
+      dotnet tool install -g dotnet-format
+      echo "##vso[task.prependpath]$HOME/.dotnet/tools"
+      dotnet format TruKare.Reports/TruKare.Reports.csproj --verify-no-changes
+      dotnet format TruKare.Reports.Tests/TruKare.Reports.Tests.csproj --verify-no-changes
+    displayName: "Lint"
+
+  - script: dotnet test TruKare.Reports.Tests/TruKare.Reports.Tests.csproj --configuration Release --no-build
+    displayName: "Test"
