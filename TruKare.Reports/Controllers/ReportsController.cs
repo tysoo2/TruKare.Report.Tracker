@@ -63,4 +63,11 @@ public class ReportsController : ControllerBase
         var audit = _reportVaultService.GetAuditTrail(id);
         return Ok(audit);
     }
+
+    [HttpPost("intake/ingest")]
+    public async Task<IActionResult> IngestIntake([FromBody] IngestIntakeRequest request, CancellationToken cancellationToken)
+    {
+        var report = await _reportVaultService.IngestIntakeAsync(request, cancellationToken);
+        return Ok(report);
+    }
 }

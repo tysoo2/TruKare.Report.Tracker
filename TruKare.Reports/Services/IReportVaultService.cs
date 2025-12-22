@@ -18,4 +18,9 @@ public interface IReportVaultService
     Task FinalizeAsync(FinalizeRequest request, CancellationToken cancellationToken);
 
     IEnumerable<AuditEvent> GetAuditTrail(Guid reportId);
+
+    /// <summary>
+    /// Ingests a new report from the intake folder (used for initial report creation or external uploads) into the canonical vault.
+    /// </summary>
+    Task<Report> IngestIntakeAsync(IngestIntakeRequest request, CancellationToken cancellationToken);
 }

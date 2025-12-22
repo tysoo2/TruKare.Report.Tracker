@@ -211,6 +211,70 @@ public class ReportVaultService : IReportVaultService
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
 
+    /// <summary>
+    /// Ingests a new report from the intake folder (used for initial report creation or uploads) into the canonical vault with validation and auditing.
+    /// </summary>
+    public Task<Report> IngestIntakeAsync(IngestIntakeRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureDirectories();
+
+        if (string.IsNullOrWhiteSpace(request.FileName))
+        {
+            throw new InvalidOperationException("File name is required.");
+        }
+
+        var intakePath = Path.Combine(_options.IntakeRoot, request.FileName);
+        if (!File.Exists(intakePath))
+        {
+            throw new InvalidOperationException($"File '{request.FileName}' does not exist in intake.");
+        }
+
+        var parsed = ParseIntakeFileName(request.FileName);
+        var canonicalDirectory = Path.Combine(_options.CanonicalRoot, parsed.CustomerName, parsed.UnitNumber, parsed.ReportType);
+        Directory.CreateDirectory(canonicalDirectory);
+
+        var canonicalPath = Path.Combine(canonicalDirectory, request.FileName);
+        if (File.Exists(canonicalPath))
+        {
+            throw new InvalidOperationException($"A canonical file already exists at {canonicalPath}.");
+        }
+
+        var existingReport = _repository
+            .GetReports()
+            .FirstOrDefault(r =>
+                r.CustomerName.Equals(parsed.CustomerName, StringComparison.OrdinalIgnoreCase) &&
+                r.UnitNumber.Equals(parsed.UnitNumber, StringComparison.OrdinalIgnoreCase) &&
+                r.ReportType.Equals(parsed.ReportType, StringComparison.OrdinalIgnoreCase));
+
+        if (existingReport != null)
+        {
+            throw new InvalidOperationException($"A report for {parsed.CustomerName}/{parsed.UnitNumber}/{parsed.ReportType} already exists.");
+        }
+
+        File.Move(intakePath, canonicalPath);
+        var now = DateTime.UtcNow;
+        var report = new Report
+        {
+            ReportId = Guid.NewGuid(),
+            CustomerName = parsed.CustomerName,
+            UnitNumber = parsed.UnitNumber,
+            ReportType = parsed.ReportType,
+            CreatedAt = now,
+            Status = ReportStatus.InProgress,
+            CanonicalPath = canonicalPath,
+            CurrentRevision = 1,
+            CurrentHash = _hashService.ComputeHash(canonicalPath),
+            LastModifiedAt = now,
+            LastModifiedBy = request.Actor
+        };
+
+        _repository.UpsertReport(report);
+        AppendAudit(report.ReportId, request.Actor, "IntakeIngest", new { canonicalPath, request.FileName });
+
+        return Task.FromResult(report);
+    }
+
     private void EnsureDirectories()
     {
         Directory.CreateDirectory(_options.CanonicalRoot);
@@ -224,6 +288,10 @@ public class ReportVaultService : IReportVaultService
             Directory.CreateDirectory(_options.ConflictsRoot);
         }
         Directory.CreateDirectory(_options.WorkspaceRoot);
+        if (!string.IsNullOrWhiteSpace(_options.IntakeRoot))
+        {
+            Directory.CreateDirectory(_options.IntakeRoot);
+        }
     }
 
     private void EnsureCanonicalExists(Report report)
@@ -330,5 +398,29 @@ public class ReportVaultService : IReportVaultService
             Timestamp = DateTime.UtcNow,
             Details = payload
         });
+    }
+
+    private (string CustomerName, string UnitNumber, string ReportType) ParseIntakeFileName(string fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+        if (!string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Intake files must be PDFs.");
+        }
+
+        var segments = fileNameWithoutExtension.Split("__", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length != 3)
+        {
+            throw new InvalidOperationException("Intake files must follow the naming convention CustomerName__UnitNumber__ReportType.pdf.");
+        }
+
+        var hasEmptySegment = segments.Any(string.IsNullOrWhiteSpace);
+        if (hasEmptySegment)
+        {
+            throw new InvalidOperationException("Intake file naming segments cannot be empty.");
+        }
+
+        return (segments[0], segments[1], segments[2]);
     }
 }
