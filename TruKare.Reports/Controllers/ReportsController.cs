@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Services;
 
@@ -9,10 +11,12 @@ namespace TruKare.Reports.Controllers;
 public class ReportsController : ControllerBase
 {
     private readonly IReportVaultService _reportVaultService;
+    private readonly IAdminAuthorizationService _adminAuthorizationService;
 
-    public ReportsController(IReportVaultService reportVaultService)
+    public ReportsController(IReportVaultService reportVaultService, IAdminAuthorizationService adminAuthorizationService)
     {
         _reportVaultService = reportVaultService;
+        _adminAuthorizationService = adminAuthorizationService;
     }
 
     [HttpGet]
@@ -37,10 +41,19 @@ public class ReportsController : ControllerBase
     }
 
     [HttpPost("override-checkout")]
+    [RequireAdmin]
     public async Task<IActionResult> OverrideCheckout([FromBody] OverrideCheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.OverrideCheckoutAsync(request, cancellationToken);
-        return Ok(response);
+        try
+        {
+            request.AdminUser = _adminAuthorizationService.GetCurrentAdminUser(HttpContext);
+            var response = await _reportVaultService.OverrideCheckoutAsync(request, cancellationToken);
+            return Ok(response);
+        }
+        catch (AdminAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ErrorResponse.Forbidden(ex.Message));
+        }
     }
 
     [HttpPost("checkin")]
@@ -51,10 +64,19 @@ public class ReportsController : ControllerBase
     }
 
     [HttpPost("finalize")]
+    [RequireAdmin]
     public async Task<IActionResult> Finalize([FromBody] FinalizeRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.FinalizeAsync(request, cancellationToken);
-        return Ok();
+        try
+        {
+            request.User = _adminAuthorizationService.GetCurrentAdminUser(HttpContext);
+            await _reportVaultService.FinalizeAsync(request, cancellationToken);
+            return Ok();
+        }
+        catch (AdminAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, ErrorResponse.Forbidden(ex.Message));
+        }
     }
 
     [HttpGet("{id:guid}/audit")]
