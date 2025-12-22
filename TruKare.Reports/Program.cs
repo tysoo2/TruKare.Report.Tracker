@@ -26,7 +26,7 @@ builder.Services.PostConfigure<VaultOptions>(options =>
 });
 builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
-builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
+builder.Services.AddSingleton<INotificationService, FanOutNotificationService>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
 
 var app = builder.Build();

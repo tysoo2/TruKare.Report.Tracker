@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using TruKare.Reports.DTOs;
@@ -112,17 +113,48 @@ public class ReportVaultService : IReportVaultService
             existingLock.OverriddenAt = DateTime.UtcNow;
             _repository.SaveLock(existingLock);
 
+            string? conflictCopyPath = null;
             foreach (var session in _repository.GetSessions(report.ReportId))
             {
                 session.IsOverridden = true;
                 session.EndedAt = DateTime.UtcNow;
                 session.EndReason = SessionEndReason.OverrideByAdmin;
                 _repository.SaveSession(session);
+
+                conflictCopyPath ??= await PreserveConflictCopyAsync(session, report, cancellationToken);
             }
 
-            var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {request.AdminUser}. Reason: {request.Reason}";
-            await _notificationService.NotifyAsync(existingLock.LockedBy, "Lock overridden", notifyMessage, cancellationToken);
-            AppendAudit(report.ReportId, request.AdminUser, "OverrideCheckout", new { request.Host, request.Reason, existingLock.LockedBy });
+            var message = $"Lock holder: {existingLock.LockedBy} (since {existingLock.LockedAt:u}). " +
+                          $"Override reason: {request.Reason}. " +
+                          $"Conflict copy: {conflictCopyPath ?? "unavailable"}.";
+
+            var metadata = new Dictionary<string, string>
+            {
+                ["lockedBy"] = existingLock.LockedBy,
+                ["lockedAtUtc"] = existingLock.LockedAt.ToString("u"),
+                ["overrideReason"] = request.Reason
+            };
+
+            if (conflictCopyPath is not null)
+            {
+                metadata["conflictCopyPath"] = conflictCopyPath;
+            }
+
+            await _notificationService.NotifyAsync(new NotificationRequest
+            {
+                User = existingLock.LockedBy,
+                Subject = "Lock overridden",
+                Message = message,
+                Channels = new[]
+                {
+                    NotificationChannel.Email,
+                    NotificationChannel.Teams,
+                    NotificationChannel.DesktopToast
+                },
+                Metadata = metadata
+            }, cancellationToken);
+
+            AppendAudit(report.ReportId, request.AdminUser, "OverrideCheckout", new { request.Host, request.Reason, existingLock.LockedBy, conflictCopyPath });
         }
 
         var checkoutRequest = new CheckoutRequest
@@ -145,7 +177,7 @@ public class ReportVaultService : IReportVaultService
 
         if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, request.User, StringComparison.OrdinalIgnoreCase)))
         {
-            await PreserveConflictCopyAsync(session, report);
+            await PreserveConflictCopyAsync(session, report, cancellationToken);
             throw new InvalidOperationException($"This report was overridden by {reportLock?.OverriddenBy}. Your copy is stale.");
         }
 
@@ -304,11 +336,11 @@ public class ReportVaultService : IReportVaultService
         }
     }
 
-    private async Task PreserveConflictCopyAsync(CheckoutSession session, Report report)
+    private async Task<string?> PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.ConflictsRoot) || !File.Exists(session.LocalPath))
         {
-            return;
+            return null;
         }
 
         var conflictFolder = Path.Combine(_options.ConflictsRoot, session.User, report.ReportId.ToString());
@@ -316,7 +348,19 @@ public class ReportVaultService : IReportVaultService
         var conflictName = $"{Path.GetFileNameWithoutExtension(session.LocalPath)}_{DateTime.UtcNow:yyyyMMddHHmmss}{Path.GetExtension(session.LocalPath)}";
         var conflictPath = Path.Combine(conflictFolder, conflictName);
         File.Copy(session.LocalPath, conflictPath, overwrite: true);
-        await _notificationService.NotifyAsync(session.User, "Stale copy quarantined", $"A stale copy was preserved at {conflictPath}", CancellationToken.None);
+        await _notificationService.NotifyAsync(new NotificationRequest
+        {
+            User = session.User,
+            Subject = "Stale copy quarantined",
+            Message = $"A stale copy was preserved at {conflictPath}",
+            Metadata = new Dictionary<string, string>
+            {
+                ["conflictCopyPath"] = conflictPath,
+                ["reportId"] = report.ReportId.ToString()
+            }
+        }, cancellationToken);
+
+        return conflictPath;
     }
 
     private void AppendAudit(Guid reportId, string actor, string action, object details)
