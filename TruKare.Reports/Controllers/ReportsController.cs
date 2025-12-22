@@ -1,18 +1,23 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Services;
 
 namespace TruKare.Reports.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("reports")]
 public class ReportsController : ControllerBase
 {
     private readonly IReportVaultService _reportVaultService;
+    private readonly IUserContextAccessor _userContextAccessor;
 
-    public ReportsController(IReportVaultService reportVaultService)
+    public ReportsController(IReportVaultService reportVaultService, IUserContextAccessor userContextAccessor)
     {
         _reportVaultService = reportVaultService;
+        _userContextAccessor = userContextAccessor;
     }
 
     [HttpGet]
@@ -32,28 +37,34 @@ public class ReportsController : ControllerBase
     [HttpPost("checkout")]
     public async Task<IActionResult> Checkout([FromBody] CheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.CheckoutAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.CheckoutAsync(request, userContext, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("override-checkout")]
+    [Authorize(Policy = AdminPolicies.AdminGroup)]
     public async Task<IActionResult> OverrideCheckout([FromBody] OverrideCheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.OverrideCheckoutAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.OverrideCheckoutAsync(request, userContext, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("checkin")]
     public async Task<IActionResult> Checkin([FromBody] CheckinRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.CheckinAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.CheckinAsync(request, userContext, cancellationToken);
         return Ok();
     }
 
     [HttpPost("finalize")]
+    [RequireAdmin]
     public async Task<IActionResult> Finalize([FromBody] FinalizeRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.FinalizeAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.FinalizeAsync(request, userContext, cancellationToken);
         return Ok();
     }
 
