@@ -1,4 +1,8 @@
 using System.Text.Json;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using iText.Forms;
+using iText.Kernel.Pdf;
 using Microsoft.Extensions.Options;
 using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
@@ -200,15 +204,15 @@ public class ReportVaultService : IReportVaultService
         }
 
         EnsureFileClosed(session.LocalPath);
+        EnsureDirectories();
 
         var finalizeCheckin = new CheckinRequest { SessionId = request.SessionId };
         await CheckinAsync(finalizeCheckin, userContext, cancellationToken);
 
-        var finalDirectory = _options.FinalRoot;
-        Directory.CreateDirectory(finalDirectory);
-        var canonicalName = Path.GetFileNameWithoutExtension(report.CanonicalPath);
-        var extension = Path.GetExtension(report.CanonicalPath);
-        var finalPath = Path.Combine(finalDirectory, $"{canonicalName}.FINAL{extension}");
+        var refreshedReport = _repository.GetReport(report.ReportId) ?? throw new InvalidOperationException("Report not found after check-in.");
+        var finalPath = BuildFinalPath(refreshedReport);
+        var finalizationMode = GenerateFinalArtifact(refreshedReport.CanonicalPath, finalPath);
+        ApplyFinalAcls(finalPath);
 
         File.Copy(report.CanonicalPath, finalPath, overwrite: true);
         report.FinalPath = finalPath;
@@ -340,5 +344,101 @@ public class ReportVaultService : IReportVaultService
             Timestamp = DateTime.UtcNow,
             Details = payload
         });
+    }
+
+    private string BuildFinalPath(Report report)
+    {
+        var relativeCanonical = Path.GetRelativePath(_options.CanonicalRoot, report.CanonicalPath);
+        if (relativeCanonical.StartsWith("..", StringComparison.Ordinal))
+        {
+            relativeCanonical = Path.GetFileName(report.CanonicalPath);
+        }
+
+        var relativeDirectory = Path.GetDirectoryName(relativeCanonical);
+        var finalName = $"{Path.GetFileNameWithoutExtension(relativeCanonical)}.FINAL{Path.GetExtension(relativeCanonical)}";
+
+        return string.IsNullOrWhiteSpace(relativeDirectory)
+            ? Path.Combine(_options.FinalRoot, finalName)
+            : Path.Combine(_options.FinalRoot, relativeDirectory, finalName);
+    }
+
+    private string GenerateFinalArtifact(string canonicalPath, string finalPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}{Path.GetExtension(finalPath)}");
+
+        var mode = "Copy";
+        if (Path.GetExtension(canonicalPath).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            FlattenPdf(canonicalPath, tempPath);
+            mode = "FlattenedWithIText7";
+        }
+        else
+        {
+            File.Copy(canonicalPath, tempPath, overwrite: true);
+        }
+
+        File.Move(tempPath, finalPath, overwrite: true);
+        return mode;
+    }
+
+    private void FlattenPdf(string canonicalPath, string outputPath)
+    {
+        using var reader = new PdfReader(canonicalPath);
+        using var writer = new PdfWriter(outputPath);
+        using var pdf = new PdfDocument(reader, writer);
+        var form = PdfAcroForm.GetAcroForm(pdf, false);
+        form?.FlattenFields();
+    }
+
+    private void ApplyFinalAcls(string finalPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var info = new FileInfo(finalPath);
+            var security = info.GetAccessControl();
+            security.SetAccessRuleProtection(true, false);
+
+            var existingRules = security
+                .GetAccessRules(true, true, typeof(SecurityIdentifier))
+                .OfType<FileSystemAccessRule>()
+                .ToList();
+
+            foreach (var rule in existingRules)
+            {
+                security.RemoveAccessRuleSpecific(rule);
+            }
+
+            var currentUser = WindowsIdentity.GetCurrent();
+            var adminSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+
+            security.AddAccessRule(new FileSystemAccessRule(adminSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            if (currentUser?.User != null)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(currentUser.User, FileSystemRights.Modify | FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+            }
+            security.AddAccessRule(new FileSystemAccessRule(usersSid, FileSystemRights.ReadAndExecute | FileSystemRights.Read, AccessControlType.Allow));
+
+            info.SetAccessControl(security);
+            File.SetAttributes(finalPath, File.GetAttributes(finalPath) | FileAttributes.ReadOnly);
+            return;
+        }
+
+        TrySetPosixReadOnly(finalPath);
+    }
+
+    private void TrySetPosixReadOnly(string path)
+    {
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        }
+        catch (Exception) when (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
+        }
     }
 }
