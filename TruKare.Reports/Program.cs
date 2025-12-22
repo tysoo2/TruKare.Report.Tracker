@@ -1,5 +1,9 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Options;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.Models;
+using TruKare.Reports.Middleware;
 using TruKare.Reports.Options;
 using TruKare.Reports.Repositories;
 using TruKare.Reports.Services;
@@ -8,12 +12,32 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
+builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme)
+    .AddNegotiate();
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+    options.AddPolicy(AdminPolicies.AdminGroup, policy =>
+    {
+        policy.Requirements.Add(new AdminGroupRequirement());
+    });
+});
+builder.Services.AddScoped<IAuthorizationHandler, AdminGroupHandler>();
+builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
+builder.Services.AddScoped<IAdminGroupValidator, WindowsAdminGroupValidator>();
+builder.Services.AddScoped<IUserContextAccessor, HttpContextUserContextAccessor>();
+builder.Services.AddHttpContextAccessor();
+
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<VaultOptions>(builder.Configuration.GetSection("Vault"));
+builder.Services.AddHttpContextAccessor();
 builder.Services.PostConfigure<VaultOptions>(options =>
 {
     var baseVault = Path.Combine(builder.Environment.ContentRootPath, "Vault");
@@ -21,13 +45,16 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.FinalRoot = string.IsNullOrWhiteSpace(options.FinalRoot) ? Path.Combine(baseVault, "Final") : options.FinalRoot;
     options.ArchiveRoot = string.IsNullOrWhiteSpace(options.ArchiveRoot) ? Path.Combine(baseVault, "Archive") : options.ArchiveRoot;
     options.ConflictsRoot = string.IsNullOrWhiteSpace(options.ConflictsRoot) ? Path.Combine(baseVault, "Conflicts") : options.ConflictsRoot;
+    options.OrphansRoot = string.IsNullOrWhiteSpace(options.OrphansRoot) ? Path.Combine(baseVault, "Orphans") : options.OrphansRoot;
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
-builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
+builder.Services.AddSingleton<IReportRepository, PostgresReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
-builder.Services.AddSingleton<INotificationService, FanOutNotificationService>();
+builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
+builder.Services.AddSingleton<IAdminAuthorizationService, AdminAuthorizationService>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
+builder.Services.AddHostedService<LockPolicyBackgroundService>();
 
 var app = builder.Build();
 
@@ -42,6 +69,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
@@ -63,6 +91,7 @@ static void SeedVault(IServiceProvider services, string contentRoot)
     configured.FinalRoot = string.IsNullOrWhiteSpace(configured.FinalRoot) ? Path.Combine(baseVault, "Final") : configured.FinalRoot;
     configured.ArchiveRoot = string.IsNullOrWhiteSpace(configured.ArchiveRoot) ? Path.Combine(baseVault, "Archive") : configured.ArchiveRoot;
     configured.ConflictsRoot = string.IsNullOrWhiteSpace(configured.ConflictsRoot) ? Path.Combine(baseVault, "Conflicts") : configured.ConflictsRoot;
+    configured.OrphansRoot = string.IsNullOrWhiteSpace(configured.OrphansRoot) ? Path.Combine(baseVault, "Orphans") : configured.OrphansRoot;
     configured.IntakeRoot = string.IsNullOrWhiteSpace(configured.IntakeRoot) ? Path.Combine(baseVault, "Intake") : configured.IntakeRoot;
     configured.WorkspaceRoot = string.IsNullOrWhiteSpace(configured.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : configured.WorkspaceRoot;
 
@@ -70,6 +99,7 @@ static void SeedVault(IServiceProvider services, string contentRoot)
     Directory.CreateDirectory(configured.FinalRoot);
     Directory.CreateDirectory(configured.ArchiveRoot);
     Directory.CreateDirectory(configured.ConflictsRoot);
+    Directory.CreateDirectory(configured.OrphansRoot);
     Directory.CreateDirectory(configured.IntakeRoot);
     Directory.CreateDirectory(configured.WorkspaceRoot);
 

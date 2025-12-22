@@ -1,6 +1,11 @@
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using iText.Forms;
+using iText.Kernel.Pdf;
 using Microsoft.Extensions.Options;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Models;
 using TruKare.Reports.Options;
@@ -14,17 +19,21 @@ public class ReportVaultService : IReportVaultService
     private readonly VaultOptions _options;
     private readonly IHashService _hashService;
     private readonly INotificationService _notificationService;
+    private readonly IAdminAuthorizationService _adminAuthorizationService;
 
     public ReportVaultService(
         IReportRepository repository,
         IOptions<VaultOptions> options,
         IHashService hashService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IAdminAuthorizationService adminAuthorizationService)
     {
         _repository = repository;
         _hashService = hashService;
         _notificationService = notificationService;
+        _adminAuthorizationService = adminAuthorizationService;
         _options = options.Value;
+        _userContext = userContext;
     }
 
     public IEnumerable<Report> SearchReports(SearchReportsRequest request)
@@ -49,14 +58,15 @@ public class ReportVaultService : IReportVaultService
         };
     }
 
-    public async Task<CheckoutResponse> CheckoutAsync(CheckoutRequest request, CancellationToken cancellationToken)
+    public async Task<CheckoutResponse> CheckoutAsync(CheckoutRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
         var report = _repository.GetReport(request.ReportId) ?? throw new InvalidOperationException("Report not found.");
         EnsureDirectories();
         EnsureCanonicalExists(report);
 
+        var currentUser = _userContext.GetCurrentUser();
         var existingLock = _repository.GetLock(report.ReportId);
-        if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, request.User, StringComparison.OrdinalIgnoreCase))
+        if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Report is locked by {existingLock.LockedBy} since {existingLock.LockedAt:g}.");
         }
@@ -69,8 +79,8 @@ public class ReportVaultService : IReportVaultService
         {
             ReportId = report.ReportId,
             LockedAt = DateTime.UtcNow,
-            LockedBy = request.User,
-            LockedFromHost = request.Host,
+            LockedBy = userContext.UserName,
+            LockedFromHost = userContext.Host,
             LockState = LockState.Active
         };
 
@@ -80,14 +90,14 @@ public class ReportVaultService : IReportVaultService
         {
             SessionId = sessionId,
             ReportId = report.ReportId,
-            User = request.User,
+            User = userContext.UserName,
             LocalPath = localPath,
             BaseHash = baseHash,
             StartedAt = DateTime.UtcNow
         };
 
         _repository.SaveSession(session);
-        AppendAudit(report.ReportId, request.User, "Checkout", new { request.Host, request.IsAdmin });
+        AppendAudit(report.ReportId, userContext.UserName, "Checkout", new { Host = userContext.Host, userContext.IsAdmin });
 
         return new CheckoutResponse
         {
@@ -98,18 +108,25 @@ public class ReportVaultService : IReportVaultService
         };
     }
 
-    public async Task<CheckoutResponse> OverrideCheckoutAsync(OverrideCheckoutRequest request, CancellationToken cancellationToken)
+    public async Task<CheckoutResponse> OverrideCheckoutAsync(OverrideCheckoutRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
+        _adminAuthorizationService.EnsureAdmin();
+        request.AdminUser = _adminAuthorizationService.GetCurrentAdminUser();
         var report = _repository.GetReport(request.ReportId) ?? throw new InvalidOperationException("Report not found.");
         EnsureDirectories();
         EnsureCanonicalExists(report);
+
+        if (!userContext.IsAdmin)
+        {
+            throw new UnauthorizedAccessException("Admin privileges are required to override a checkout.");
+        }
 
         var existingLock = _repository.GetLock(report.ReportId);
         if (existingLock != null && existingLock.LockState == LockState.Active)
         {
             existingLock.LockState = LockState.Overridden;
             existingLock.OverrideReason = request.Reason;
-            existingLock.OverriddenBy = request.AdminUser;
+            existingLock.OverriddenBy = userContext.UserName;
             existingLock.OverriddenAt = DateTime.UtcNow;
             _repository.SaveLock(existingLock);
 
@@ -140,42 +157,28 @@ public class ReportVaultService : IReportVaultService
                 metadata["conflictCopyPath"] = conflictCopyPath;
             }
 
-            await _notificationService.NotifyAsync(new NotificationRequest
-            {
-                User = existingLock.LockedBy,
-                Subject = "Lock overridden",
-                Message = message,
-                Channels = new[]
-                {
-                    NotificationChannel.Email,
-                    NotificationChannel.Teams,
-                    NotificationChannel.DesktopToast
-                },
-                Metadata = metadata
-            }, cancellationToken);
-
-            AppendAudit(report.ReportId, request.AdminUser, "OverrideCheckout", new { request.Host, request.Reason, existingLock.LockedBy, conflictCopyPath });
+            var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {userContext.UserName}. Reason: {request.Reason}";
+            await _notificationService.NotifyAsync(existingLock.LockedBy, "Lock overridden", notifyMessage, cancellationToken);
+            AppendAudit(report.ReportId, userContext.UserName, "OverrideCheckout", new { Host = userContext.Host, request.Reason, existingLock.LockedBy });
         }
 
         var checkoutRequest = new CheckoutRequest
         {
-            Host = request.Host,
             ReportId = request.ReportId,
-            User = request.AdminUser,
-            IsAdmin = true,
             OverrideReason = request.Reason
         };
 
-        return await CheckoutAsync(checkoutRequest, cancellationToken);
+        return await CheckoutAsync(checkoutRequest, userContext, cancellationToken);
     }
 
-    public async Task CheckinAsync(CheckinRequest request, CancellationToken cancellationToken)
+    public async Task CheckinAsync(CheckinRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
-        if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, request.User, StringComparison.OrdinalIgnoreCase)))
+        if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, userContext.UserName, StringComparison.OrdinalIgnoreCase)))
         {
             await PreserveConflictCopyAsync(session, report, cancellationToken);
             throw new InvalidOperationException($"This report was overridden by {reportLock?.OverriddenBy}. Your copy is stale.");
@@ -189,7 +192,7 @@ public class ReportVaultService : IReportVaultService
             CompleteSession(session, SessionEndReason.NoChanges);
             ReleaseLock(report.ReportId);
             DeleteWorkspace(session.LocalPath);
-            AppendAudit(report.ReportId, request.User, "NoChangeCheckin", new { session.SessionId });
+            AppendAudit(report.ReportId, userContext.UserName, "NoChangeCheckin", new { session.SessionId });
             return;
         }
 
@@ -200,48 +203,122 @@ public class ReportVaultService : IReportVaultService
         report.CurrentRevision = previousRevision + 1;
         report.CurrentHash = _hashService.ComputeHash(report.CanonicalPath);
         report.LastModifiedAt = DateTime.UtcNow;
-        report.LastModifiedBy = request.User;
+        report.LastModifiedBy = userContext.UserName;
         _repository.UpsertReport(report);
 
         CompleteSession(session, SessionEndReason.CheckedIn);
         ReleaseLock(report.ReportId);
         DeleteWorkspace(session.LocalPath);
 
-        AppendAudit(report.ReportId, request.User, "Checkin", new { session.SessionId, revision = report.CurrentRevision });
+        AppendAudit(report.ReportId, userContext.UserName, "Checkin", new { session.SessionId, revision = report.CurrentRevision });
     }
 
-    public async Task FinalizeAsync(FinalizeRequest request, CancellationToken cancellationToken)
+    public async Task FinalizeAsync(FinalizeRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
+        _adminAuthorizationService.EnsureAdmin();
+        request.User = _adminAuthorizationService.GetCurrentAdminUser();
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
-        if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, request.User, StringComparison.OrdinalIgnoreCase))
+        if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("You must hold the active lock to finalize.");
         }
 
         EnsureFileClosed(session.LocalPath);
+        EnsureDirectories();
 
-        var finalizeCheckin = new CheckinRequest { SessionId = request.SessionId, User = request.User };
-        await CheckinAsync(finalizeCheckin, cancellationToken);
+        var finalizeCheckin = new CheckinRequest { SessionId = request.SessionId };
+        await CheckinAsync(finalizeCheckin, userContext, cancellationToken);
 
-        var finalDirectory = _options.FinalRoot;
-        Directory.CreateDirectory(finalDirectory);
-        var canonicalName = Path.GetFileNameWithoutExtension(report.CanonicalPath);
-        var extension = Path.GetExtension(report.CanonicalPath);
-        var finalPath = Path.Combine(finalDirectory, $"{canonicalName}.FINAL{extension}");
+        var refreshedReport = _repository.GetReport(report.ReportId) ?? throw new InvalidOperationException("Report not found after check-in.");
+        var finalPath = BuildFinalPath(refreshedReport);
+        var finalizationMode = GenerateFinalArtifact(refreshedReport.CanonicalPath, finalPath);
+        ApplyFinalAcls(finalPath);
 
         File.Copy(report.CanonicalPath, finalPath, overwrite: true);
         report.FinalPath = finalPath;
         report.Status = ReportStatus.Done;
         report.LastModifiedAt = DateTime.UtcNow;
-        report.LastModifiedBy = request.User;
+        report.LastModifiedBy = userContext.UserName;
         _repository.UpsertReport(report);
-        AppendAudit(report.ReportId, request.User, "Finalize", new { finalPath });
+        AppendAudit(report.ReportId, userContext.UserName, "Finalize", new { finalPath });
     }
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
+
+    public DashboardSummaryResponse GetDashboardSummary()
+    {
+        var reports = _repository.GetReports().ToList();
+        var reportLookup = reports.ToDictionary(r => r.ReportId);
+        var activeLocks = _repository.GetLocks().Where(l => l.LockState == LockState.Active).ToList();
+        var locksByReportId = activeLocks
+            .GroupBy(l => l.ReportId)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(lockRecord => lockRecord.LockedAt).First());
+
+        var totals = new DashboardStatusCounts
+        {
+            InProgress = reports.Count(r => r.Status == ReportStatus.InProgress),
+            Done = reports.Count(r => r.Status == ReportStatus.Done),
+            Archived = reports.Count(r => r.Status == ReportStatus.Archived),
+            Locked = activeLocks.Count
+        };
+
+        IEnumerable<DashboardGroupBreakdown> BuildGrouped(Func<Report, string> keySelector)
+        {
+            return reports
+                .GroupBy(keySelector, StringComparer.OrdinalIgnoreCase)
+                .Select(group => new DashboardGroupBreakdown
+                {
+                    Key = group.Key,
+                    InProgress = group.Count(r => r.Status == ReportStatus.InProgress),
+                    Done = group.Count(r => r.Status == ReportStatus.Done),
+                    Archived = group.Count(r => r.Status == ReportStatus.Archived),
+                    Locked = group.Count(r => locksByReportId.ContainsKey(r.ReportId))
+                })
+                .OrderByDescending(g => g.Locked)
+                .ThenByDescending(g => g.InProgress)
+                .ThenBy(g => g.Key)
+                .ToArray();
+        }
+
+        var byLockedBy = activeLocks
+            .GroupBy(l => l.LockedBy, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var statuses = group
+                    .Select(l => reportLookup.TryGetValue(l.ReportId, out var report) ? report.Status : (ReportStatus?)null)
+                    .Where(status => status.HasValue)
+                    .Select(status => status!.Value)
+                    .ToArray();
+
+                return new DashboardGroupBreakdown
+                {
+                    Key = group.Key,
+                    Locked = group.Count(),
+                    InProgress = statuses.Count(status => status == ReportStatus.InProgress),
+                    Done = statuses.Count(status => status == ReportStatus.Done),
+                    Archived = statuses.Count(status => status == ReportStatus.Archived)
+                };
+            })
+            .OrderByDescending(g => g.Locked)
+            .ThenBy(g => g.Key)
+            .ToArray();
+
+        return new DashboardSummaryResponse
+        {
+            Totals = totals,
+            ByCustomer = BuildGrouped(r => r.CustomerName),
+            ByUnit = BuildGrouped(r => r.UnitNumber),
+            ByLockedBy = byLockedBy
+        };
+    }
+
+    public IEnumerable<FileIssueSummary> GetConflicts() => GetFileIssues(_options.ConflictsRoot, "Conflict");
+
+    public IEnumerable<FileIssueSummary> GetOrphans() => GetFileIssues(_options.OrphansRoot, "Orphan");
 
     private void EnsureDirectories()
     {
@@ -254,6 +331,10 @@ public class ReportVaultService : IReportVaultService
         if (!string.IsNullOrWhiteSpace(_options.ConflictsRoot))
         {
             Directory.CreateDirectory(_options.ConflictsRoot);
+        }
+        if (!string.IsNullOrWhiteSpace(_options.OrphansRoot))
+        {
+            Directory.CreateDirectory(_options.OrphansRoot);
         }
         Directory.CreateDirectory(_options.WorkspaceRoot);
     }
@@ -336,7 +417,7 @@ public class ReportVaultService : IReportVaultService
         }
     }
 
-    private async Task<string?> PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
+    private async Task PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.ConflictsRoot) || !File.Exists(session.LocalPath))
         {
@@ -348,19 +429,7 @@ public class ReportVaultService : IReportVaultService
         var conflictName = $"{Path.GetFileNameWithoutExtension(session.LocalPath)}_{DateTime.UtcNow:yyyyMMddHHmmss}{Path.GetExtension(session.LocalPath)}";
         var conflictPath = Path.Combine(conflictFolder, conflictName);
         File.Copy(session.LocalPath, conflictPath, overwrite: true);
-        await _notificationService.NotifyAsync(new NotificationRequest
-        {
-            User = session.User,
-            Subject = "Stale copy quarantined",
-            Message = $"A stale copy was preserved at {conflictPath}",
-            Metadata = new Dictionary<string, string>
-            {
-                ["conflictCopyPath"] = conflictPath,
-                ["reportId"] = report.ReportId.ToString()
-            }
-        }, cancellationToken);
-
-        return conflictPath;
+        await _notificationService.NotifyAsync(session.User, "Stale copy quarantined", $"A stale copy was preserved at {conflictPath}", cancellationToken);
     }
 
     private void AppendAudit(Guid reportId, string actor, string action, object details)
@@ -374,5 +443,101 @@ public class ReportVaultService : IReportVaultService
             Timestamp = DateTime.UtcNow,
             Details = payload
         });
+    }
+
+    private string BuildFinalPath(Report report)
+    {
+        var relativeCanonical = Path.GetRelativePath(_options.CanonicalRoot, report.CanonicalPath);
+        if (relativeCanonical.StartsWith("..", StringComparison.Ordinal))
+        {
+            relativeCanonical = Path.GetFileName(report.CanonicalPath);
+        }
+
+        var relativeDirectory = Path.GetDirectoryName(relativeCanonical);
+        var finalName = $"{Path.GetFileNameWithoutExtension(relativeCanonical)}.FINAL{Path.GetExtension(relativeCanonical)}";
+
+        return string.IsNullOrWhiteSpace(relativeDirectory)
+            ? Path.Combine(_options.FinalRoot, finalName)
+            : Path.Combine(_options.FinalRoot, relativeDirectory, finalName);
+    }
+
+    private string GenerateFinalArtifact(string canonicalPath, string finalPath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}{Path.GetExtension(finalPath)}");
+
+        var mode = "Copy";
+        if (Path.GetExtension(canonicalPath).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            FlattenPdf(canonicalPath, tempPath);
+            mode = "FlattenedWithIText7";
+        }
+        else
+        {
+            File.Copy(canonicalPath, tempPath, overwrite: true);
+        }
+
+        File.Move(tempPath, finalPath, overwrite: true);
+        return mode;
+    }
+
+    private void FlattenPdf(string canonicalPath, string outputPath)
+    {
+        using var reader = new PdfReader(canonicalPath);
+        using var writer = new PdfWriter(outputPath);
+        using var pdf = new PdfDocument(reader, writer);
+        var form = PdfAcroForm.GetAcroForm(pdf, false);
+        form?.FlattenFields();
+    }
+
+    private void ApplyFinalAcls(string finalPath)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var info = new FileInfo(finalPath);
+            var security = info.GetAccessControl();
+            security.SetAccessRuleProtection(true, false);
+
+            var existingRules = security
+                .GetAccessRules(true, true, typeof(SecurityIdentifier))
+                .OfType<FileSystemAccessRule>()
+                .ToList();
+
+            foreach (var rule in existingRules)
+            {
+                security.RemoveAccessRuleSpecific(rule);
+            }
+
+            var currentUser = WindowsIdentity.GetCurrent();
+            var adminSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+
+            security.AddAccessRule(new FileSystemAccessRule(adminSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            security.AddAccessRule(new FileSystemAccessRule(systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            if (currentUser?.User != null)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(currentUser.User, FileSystemRights.Modify | FileSystemRights.ReadAndExecute, AccessControlType.Allow));
+            }
+            security.AddAccessRule(new FileSystemAccessRule(usersSid, FileSystemRights.ReadAndExecute | FileSystemRights.Read, AccessControlType.Allow));
+
+            info.SetAccessControl(security);
+            File.SetAttributes(finalPath, File.GetAttributes(finalPath) | FileAttributes.ReadOnly);
+            return;
+        }
+
+        TrySetPosixReadOnly(finalPath);
+    }
+
+    private void TrySetPosixReadOnly(string path)
+    {
+        try
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        }
+        catch (Exception) when (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
+        }
     }
 }
