@@ -337,6 +337,10 @@ public class ReportVaultService : IReportVaultService
             Directory.CreateDirectory(_options.OrphansRoot);
         }
         Directory.CreateDirectory(_options.WorkspaceRoot);
+        if (!string.IsNullOrWhiteSpace(_options.IntakeRoot))
+        {
+            Directory.CreateDirectory(_options.IntakeRoot);
+        }
     }
 
     private void EnsureCanonicalExists(Report report)
