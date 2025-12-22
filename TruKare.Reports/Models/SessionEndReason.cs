@@ -5,5 +5,6 @@ public enum SessionEndReason
     CheckedIn,
     NoChanges,
     OverrideByAdmin,
-    Abandoned
+    Abandoned,
+    AutoReleased
 }
