@@ -32,6 +32,7 @@ public class ReportVaultService : IReportVaultService
         _notificationService = notificationService;
         _adminAuthorizationService = adminAuthorizationService;
         _options = options.Value;
+        _userContext = userContext;
     }
 
     public IEnumerable<Report> SearchReports(SearchReportsRequest request)
@@ -62,6 +63,7 @@ public class ReportVaultService : IReportVaultService
         EnsureDirectories();
         EnsureCanonicalExists(report);
 
+        var currentUser = _userContext.GetCurrentUser();
         var existingLock = _repository.GetLock(report.ReportId);
         if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {
@@ -154,6 +156,7 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
         if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, userContext.UserName, StringComparison.OrdinalIgnoreCase)))
         {
@@ -197,6 +200,7 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
+        var currentUser = _userContext.GetCurrentUser();
 
         if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using TruKare.Reports.Authorization;
 using TruKare.Reports.Models;
+using TruKare.Reports.Middleware;
 using TruKare.Reports.Options;
 using TruKare.Reports.Repositories;
 using TruKare.Reports.Services;
