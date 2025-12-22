@@ -1,6 +1,14 @@
 ﻿0) North Star Goals
 User experience goals
 
+Phase overview (high level sequencing)
+1. Phase 1: add authentication; desktop client with closed-file detection and “My Checked Out.”
+2. Phase 2: add admin “view history” UI/endpoint for audits.
+3. Phase 3: AD admin roles, real notifications, override UX warnings/reasons in client.
+4. Phase 4: FINAL generation/locking strategy.
+5. Phase 5: server-side sorter and orphan/conflict admin handling.
+6. Phase 6: reminders/tray UX, dashboards, daily expiry policy.
+
 ✅ Feels like one clipboard: one obvious “current copy” of each report.
 
 ✅ Users don’t browse folders, rename repeatedly, or manually sort files.

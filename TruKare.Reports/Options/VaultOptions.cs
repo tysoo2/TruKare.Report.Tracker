@@ -10,9 +10,8 @@ public class VaultOptions
 
     public string ConflictsRoot { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Root folder for intake files used during initial report creation or external uploads before they are ingested into the canonical vault.
-    /// </summary>
+    public string OrphansRoot { get; set; } = string.Empty;
+
     public string IntakeRoot { get; set; } = string.Empty;
 
     public string WorkspaceRoot { get; set; } = string.Empty;

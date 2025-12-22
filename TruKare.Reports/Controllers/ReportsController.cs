@@ -1,18 +1,23 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using TruKare.Reports.Authorization;
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Services;
 
 namespace TruKare.Reports.Controllers;
 
 [ApiController]
+[Authorize]
 [Route("reports")]
 public class ReportsController : ControllerBase
 {
     private readonly IReportVaultService _reportVaultService;
+    private readonly IUserContextAccessor _userContextAccessor;
 
-    public ReportsController(IReportVaultService reportVaultService)
+    public ReportsController(IReportVaultService reportVaultService, IUserContextAccessor userContextAccessor)
     {
         _reportVaultService = reportVaultService;
+        _userContextAccessor = userContextAccessor;
     }
 
     [HttpGet]
@@ -32,28 +37,34 @@ public class ReportsController : ControllerBase
     [HttpPost("checkout")]
     public async Task<IActionResult> Checkout([FromBody] CheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.CheckoutAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.CheckoutAsync(request, userContext, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("override-checkout")]
+    [Authorize(Policy = AdminPolicies.AdminGroup)]
     public async Task<IActionResult> OverrideCheckout([FromBody] OverrideCheckoutRequest request, CancellationToken cancellationToken)
     {
-        var response = await _reportVaultService.OverrideCheckoutAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        var response = await _reportVaultService.OverrideCheckoutAsync(request, userContext, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("checkin")]
     public async Task<IActionResult> Checkin([FromBody] CheckinRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.CheckinAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.CheckinAsync(request, userContext, cancellationToken);
         return Ok();
     }
 
     [HttpPost("finalize")]
+    [RequireAdmin]
     public async Task<IActionResult> Finalize([FromBody] FinalizeRequest request, CancellationToken cancellationToken)
     {
-        await _reportVaultService.FinalizeAsync(request, cancellationToken);
+        var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
+        await _reportVaultService.FinalizeAsync(request, userContext, cancellationToken);
         return Ok();
     }
 
@@ -64,10 +75,24 @@ public class ReportsController : ControllerBase
         return Ok(audit);
     }
 
-    [HttpPost("intake/ingest")]
-    public async Task<IActionResult> IngestIntake([FromBody] IngestIntakeRequest request, CancellationToken cancellationToken)
+    [HttpGet("dashboard")]
+    public IActionResult GetDashboard()
     {
-        var report = await _reportVaultService.IngestIntakeAsync(request, cancellationToken);
-        return Ok(report);
+        var summary = _reportVaultService.GetDashboardSummary();
+        return Ok(summary);
+    }
+
+    [HttpGet("conflicts")]
+    public IActionResult ListConflicts()
+    {
+        var issues = _reportVaultService.GetConflicts();
+        return Ok(issues);
+    }
+
+    [HttpGet("orphans")]
+    public IActionResult ListOrphans()
+    {
+        var issues = _reportVaultService.GetOrphans();
+        return Ok(issues);
     }
 }
