@@ -7,18 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Negotiate" Version="10.0.1" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
-    <PackageReference Include="Swashbuckle.AspNetCore.Swagger" Version="10.1.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.1.0" />
-    <PackageReference Include="Swashbuckle.Core" Version="5.6.0" />
-    <PackageReference Include="Dapper" Version="2.1.35" />
-    <PackageReference Include="DbUp" Version="5.0.22" />
-    <PackageReference Include="DbUp.Postgresql" Version="5.0.22" />
-    <PackageReference Include="Npgsql" Version="8.0.4" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="Migrations/*.sql" />
+    <PackageReference Include="Npgsql" Version="8.0.3" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,6 @@
 using TruKare.Reports.DTOs;
 using TruKare.Reports.Models;
+using TruKare.Reports.Authorization;
 
 namespace TruKare.Reports.Services;
 
@@ -9,13 +10,19 @@ public interface IReportVaultService
 
     ReportStatusResponse GetReportStatus(Guid reportId);
 
-    Task<CheckoutResponse> CheckoutAsync(CheckoutRequest request, CancellationToken cancellationToken);
+    Task<CheckoutResponse> CheckoutAsync(CheckoutRequest request, RequestUserContext userContext, CancellationToken cancellationToken);
 
-    Task<CheckoutResponse> OverrideCheckoutAsync(OverrideCheckoutRequest request, CancellationToken cancellationToken);
+    Task<CheckoutResponse> OverrideCheckoutAsync(OverrideCheckoutRequest request, RequestUserContext userContext, CancellationToken cancellationToken);
 
-    Task CheckinAsync(CheckinRequest request, CancellationToken cancellationToken);
+    Task CheckinAsync(CheckinRequest request, RequestUserContext userContext, CancellationToken cancellationToken);
 
-    Task FinalizeAsync(FinalizeRequest request, CancellationToken cancellationToken);
+    Task FinalizeAsync(FinalizeRequest request, RequestUserContext userContext, CancellationToken cancellationToken);
 
     IEnumerable<AuditEvent> GetAuditTrail(Guid reportId);
+
+    DashboardSummaryResponse GetDashboardSummary();
+
+    IEnumerable<FileIssueSummary> GetConflicts();
+
+    IEnumerable<FileIssueSummary> GetOrphans();
 }

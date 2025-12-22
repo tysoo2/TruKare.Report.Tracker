@@ -1,0 +1,117 @@
+<Window x:Class="TruKare.Reports.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="TruKare Reports Desktop"
+        Height="720" Width="1200">
+    <Window.Resources>
+        <Style x:Key="BannerStyle" TargetType="Border">
+            <Setter Property="Background" Value="#FF1F2937"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding BannerSeverity}" Value="Error">
+                    <Setter Property="Background" Value="#FF991B1B"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding BannerSeverity}" Value="Success">
+                    <Setter Property="Background" Value="#FF065F46"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#FF111827" Padding="12">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="API Base" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox Width="240" Text="{Binding ApiBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                <TextBlock Text="User" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox Width="160" Text="{Binding CurrentUser, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                <TextBlock Text="Host" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <TextBox Width="160" Text="{Binding HostName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+                <Button Content="Refresh Statuses" Command="{Binding RefreshStatusesCommand}" Margin="12,0,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <TabControl DockPanel.Dock="Top">
+            <TabItem Header="Search Reports">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox Width="180" ToolTip="Customer" Text="{Binding CustomerName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <TextBox Width="140" ToolTip="Unit" Text="{Binding UnitNumber, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <TextBox Width="160" ToolTip="Report Type" Text="{Binding ReportType, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                        <CheckBox Content="Include archived" IsChecked="{Binding IncludeArchived}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Button Content="Search" Command="{Binding SearchCommand}" Padding="18,6" Margin="0,0,8,0"/>
+                        <Button Content="Checkout" Command="{Binding CheckoutSelectedCommand}" Padding="18,6"/>
+                    </StackPanel>
+
+                    <ListView Grid.Row="1"
+                              Margin="0,12,0,12"
+                              ItemsSource="{Binding Reports}"
+                              SelectedItem="{Binding SelectedReport}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Customer" DisplayMemberBinding="{Binding CustomerName}" Width="200"/>
+                                <GridViewColumn Header="Unit" DisplayMemberBinding="{Binding UnitNumber}" Width="100"/>
+                                <GridViewColumn Header="Type" DisplayMemberBinding="{Binding ReportType}" Width="180"/>
+                                <GridViewColumn Header="Status" Width="160">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding StatusBadge}" FontWeight="Bold"/>
+                                                <TextBlock Text="{Binding StatusDescription}" FontSize="11" Foreground="Gray"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="Last Modified" Width="200">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding LastModifiedBy}"/>
+                                                <TextBlock Text="{Binding LastModifiedAt}" FontSize="11" Foreground="Gray"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <Border Grid.Row="2" Style="{StaticResource BannerStyle}" Padding="10" CornerRadius="6">
+                        <TextBlock Text="{Binding BannerText}" Foreground="White"/>
+                    </Border>
+                </Grid>
+            </TabItem>
+            <TabItem Header="My Checked Out">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <ListView ItemsSource="{Binding ActiveCheckouts}" SelectedItem="{Binding SelectedCheckout}">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Report" DisplayMemberBinding="{Binding ReportName}" Width="260"/>
+                                <GridViewColumn Header="Started" DisplayMemberBinding="{Binding StartedAt}" Width="160"/>
+                                <GridViewColumn Header="Status" DisplayMemberBinding="{Binding StatusText}" Width="180"/>
+                                <GridViewColumn Header="Local Copy" DisplayMemberBinding="{Binding LocalPath}" Width="340"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                        <Button Content="Open Local Copy" Command="{Binding OpenLocalCopyCommand}" Margin="0,0,10,0"/>
+                        <Button Content="Check Back In" Command="{Binding CheckinSelectedCommand}"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>
