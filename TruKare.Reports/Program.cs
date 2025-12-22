@@ -52,6 +52,7 @@ builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
 builder.Services.AddSingleton<IAdminAuthorizationService, AdminAuthorizationService>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
+builder.Services.AddHostedService<LockPolicyBackgroundService>();
 
 var app = builder.Build();
 
