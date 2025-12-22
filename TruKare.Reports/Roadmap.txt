@@ -1,0 +1,645 @@
+﻿0) North Star Goals
+User experience goals
+
+✅ Feels like one clipboard: one obvious “current copy” of each report.
+
+✅ Users don’t browse folders, rename repeatedly, or manually sort files.
+
+✅ Users learn the workflow in 1–2 hours:
+
+Check Out → Edit in Adobe → Save → Close → Check Back In → (Finalize)
+
+✅ A user can always see:
+
+what they have checked out
+
+who currently holds a report
+
+how to return it (persistent, obvious button)
+
+Control goals
+
+✅ No concurrent editing: only one lock holder at a time.
+
+✅ Hard block checkout if locked (non-admin).
+
+✅ Hard block stale submit for non-admin (in practice via lock enforcement).
+
+✅ Admin can override with warnings + reason + immediate notifications.
+
+Recovery goals
+
+✅ “Last good version” recoverable (SMB shadow copies + optional app-level archive).
+
+✅ Conflicts don’t silently overwrite; they get quarantined.
+
+Constraints
+
+PDF JS works only in Adobe Reader → editing must be local.
+
+No auto-save in Adobe (we’re not forcing it).
+
+1) High-Level Architecture
+1.1 SMB “Vault” Share
+
+A dedicated SMB share for forms and reports:
+
+Vault canonical path: authoritative, current editable copies
+
+Vault final path: finalized outputs
+
+Vault archive path (optional but recommended): captured prior revisions
+
+Vault conflicts path: rejected/bypassed local copies / stale work artifacts
+
+Vault intake path (optional): if you still want “initial save location” behavior, but app can mostly eliminate that
+
+Permissions
+
+Regular users: no direct SMB access to vault paths (best practice)
+
+Service identity: full read/write
+
+Admin group: read/write
+
+This is what enforces “app is the only interface,” which is why the system stays clean.
+
+1.2 Server-side “Report Service” (recommended)
+
+A small service that:
+
+authenticates users via Windows domain identity
+
+owns all SMB operations using a service account
+
+manages locking + revisions in a DB
+
+sends notifications
+
+This avoids embedding SMB credentials in the desktop app and avoids users needing SMB access.
+
+1.3 Database (state + audit)
+
+Use SQLite initially (fast to deploy, stable), with an upgrade path to SQL Server/Postgres if needed.
+
+1.4 Desktop Client (per workstation)
+
+A simple UI:
+
+browse/search reports
+
+“My Checked Out” list
+
+persistent “Check Back In” action
+
+launch Adobe Reader
+
+status banners/alerts
+
+2) Canonical Domain Model (Data & State)
+2.1 Entities
+Report (per document instance)
+
+report_id (GUID or deterministic ID)
+
+customer_name
+
+unit_no
+
+report_type (or template ID)
+
+created_at
+
+status: InProgress | Done | Archived
+
+canonical_path (vault path to editable canonical)
+
+final_path (vault path to FINAL output, if any)
+
+current_rev (integer) OR current_hash (sha256)
+
+last_modified_at
+
+last_modified_by
+
+Lock (0 or 1 per report)
+
+report_id
+
+locked_by (DOMAIN\user)
+
+locked_at
+
+locked_from_host (workstation name)
+
+lock_state: Active | Overridden | Released
+
+override_reason (nullable)
+
+overridden_by (nullable)
+
+overridden_at (nullable)
+
+Session (per checkout action; helps local file mapping)
+
+session_id
+
+report_id
+
+user
+
+local_path
+
+base_rev or base_hash
+
+started_at
+
+ended_at
+
+end_reason: CheckedIn | NoChanges | OverrideByAdmin | Abandoned
+
+AuditEvent (append-only)
+
+timestamp
+
+actor (user/admin)
+
+action (Checkout, Checkin, Finalize, OverrideCheckout, OverrideSubmit, RejectCheckin_OpenFile, RejectCheckout_Locked, etc.)
+
+report_id
+
+details (JSON)
+
+3) Behavior Rules (Your “Clipboard Logic”)
+3.1 Checkout rules
+
+Non-admin checkout:
+
+If lock active by another user → block checkout and show “Locked by X since time”.
+
+If unlocked → grant lock, create session, pull canonical to local, open in Adobe.
+
+Admin checkout:
+
+If locked by another user → show strong warning + require reason to override.
+
+Admin can choose override → lock becomes overridden, original locker notified immediately.
+
+3.2 Check-in rules
+
+User clicks Check Back In:
+
+Must confirm the PDF is closed (detect open handle):
+
+If open → block: “Save and close the PDF before submitting.”
+
+Detect “no changes”:
+
+Compare local file hash/mtime vs base fingerprint at checkout
+
+If unchanged:
+
+Notify: “No changes detected — nothing to submit.”
+
+Release lock, end session, delete local copy
+
+Normal check-in:
+
+Replace canonical (atomic write)
+
+Increment revision / update hash
+
+Release lock
+
+End session
+
+Delete local copy
+
+3.3 Stale work handling
+
+In normal operation, stale submissions shouldn’t happen because checkout is exclusive.
+Edge cases:
+
+admin override happened
+
+lock forcibly released by admin
+
+local user tries to submit after override
+
+Rule:
+
+If session is marked overridden → block submit with message:
+
+“This report was overridden by Admin X at time. Contact admin. Your copy is stale.”
+
+Optionally preserve their local file into Conflicts\user\... for reconciliation.
+
+3.4 Finalize rules
+
+Finalize sets report state to Done and generates an immutable customer artifact:
+
+User must close PDF first (same as check-in requirement)
+
+Finalize produces:
+
+...FINAL.pdf in final folder
+
+marks status = Done
+
+locks down the final artifact (vault ACL: admin write only)
+
+Canonical editable can remain for amendments OR be locked to admin-only after done (your choice later).
+
+3.5 Notifications
+
+When an admin overrides a lock:
+
+Immediate notification to original locker even if they don’t have the app open.
+
+Admin also sees a warning and must supply a reason.
+
+Delivery options (pick later):
+
+Windows toast + background agent (best local)
+
+Email via SMTP/Exchange
+
+Teams webhook
+
+In-app banner + polling (not sufficient alone per your requirement)
+
+4) Feature Roadmap With Dependencies
+Phase 1 — Foundation (Minimal Viable Clipboard)
+
+Outcome: users can reliably check out, edit, and check in with exclusive locks.
+
+4.1 Vault setup
+
+Create SMB share + folder structure:
+
+\Vault\Customers\{Customer}\{Unit}\...
+
+\Vault\Final\...
+
+\Vault\Conflicts\...
+
+\Vault\Archive\... (optional)
+
+ACL model:
+
+service identity full
+
+admin group full
+
+users no access (preferred)
+
+Dependencies: none
+
+4.2 Report Service (API) skeleton
+
+Windows identity authentication (Integrated Auth / Kerberos on LAN)
+
+Endpoints:
+
+SearchReports
+
+GetReportStatus
+
+Checkout
+
+Checkin
+
+Finalize (stub)
+
+AdminOverrideCheckout (stub)
+
+DB schema creation and migrations
+
+Dependencies: vault paths + service account configured
+
+4.3 Desktop Client MVP UI
+
+Login identity display: “You are DOMAIN\user”
+
+Search/browse list (Customer, Unit, Report Type, Status, LockedBy)
+
+My Checked Out list
+
+Buttons:
+
+Check Out
+
+Check Back In
+
+Launch Adobe Reader with local path after checkout
+
+Dependencies: Report Service endpoints + DB
+
+4.4 Local workspace management
+
+App local folder:
+
+%LOCALAPPDATA%\TruKareReports\Work\{report_id}\...
+
+Naming rules:
+
+keep original filename but stored under report folder
+
+Cleanup on check-in (delete local)
+
+Dependencies: checkout/checkin implemented
+
+4.5 Closed-file detection
+
+On Check Back In:
+
+attempt exclusive open/rename to confirm file closed
+
+if open → block with clear message
+
+Dependencies: local workspace
+
+4.6 No-change detection
+
+Store base hash at checkout (or mtime+size)
+
+On check-in, if unchanged:
+
+notify “no changes”
+
+release lock
+
+cleanup local
+
+Dependencies: sessions + hashing
+
+Phase 1 acceptance criteria
+
+✅ One user cannot check out if locked by another user
+
+✅ User can check out, edit, close, check in
+
+✅ Check-in fails if PDF still open
+
+✅ Check-in releases lock
+
+✅ No-changes path works
+
+Phase 2 — Reliability & Audit (Still simple for users)
+
+Outcome: recovery, traceability, and safer server writes.
+
+4.7 Atomic canonical replace
+
+Upload to temp file, then atomic move/replace to canonical
+
+Avoids corruption if network glitches
+
+Dependencies: check-in logic
+
+4.8 Revision tracking
+
+current_rev++ on accepted check-in
+
+store last_modified_by/at
+
+write audit event
+
+Dependencies: DB + check-in
+
+4.9 Archive snapshots (recommended)
+
+On each successful check-in, optionally:
+
+copy previous canonical to Archive\report_id\rev####.pdf
+
+This is deterministic rollback independent of shadow copies.
+
+Dependencies: atomic replace + revision tracking
+
+4.10 Audit event log
+
+Record every significant action
+
+Add an admin “view history” for a report
+
+Dependencies: core endpoints
+
+Phase 3 — Admin Override & Notifications (Your override policy)
+
+Outcome: admin can bypass safely; original user is warned immediately.
+
+4.11 Admin roles via AD group
+
+Determine admins by membership in e.g. TRUKARE-REPORT-ADMINS
+
+Dependencies: service authentication
+
+4.12 Override checkout flow
+
+If admin attempts checkout on locked report:
+
+warning prompt shows who/when/host
+
+require “reason” selection + optional note
+
+if proceed:
+
+mark existing lock as overridden
+
+create admin lock/session
+
+notify original locker immediately
+
+Dependencies: admin identity + notifications
+
+4.13 Override submit rules
+
+Admin can submit their version normally
+
+Original user’s session becomes “bypassed”
+
+Original user can’t submit afterward (blocked at app level)
+
+Dependencies: session states + audit
+
+4.14 Immediate notification system
+
+Requirement: user notified even if app not open.
+
+Implementation options (ranked):
+
+Email to user (easy, reliable)
+
+Windows toast via a small always-on tray agent (best UX but more code)
+
+Teams message (nice, but depends on accounts)
+
+SMS (not recommended unless necessary)
+
+Dependencies: decision on notification channel + user directory mapping
+
+Phase 4 — Finalize Workflow (Done vs In Progress)
+
+Outcome: you can filter active vs completed, and generate FINAL artifacts.
+
+4.15 Finalize button behavior
+
+Preconditions:
+
+must be checked out by user (or admin)
+
+file must be closed
+
+Actions:
+
+set report status to Done
+
+generate FINAL artifact and store in \Vault\Final\...
+
+lock FINAL file ACLs (admin write only)
+
+release lock + cleanup local
+
+Dependencies: check-in pattern + status fields
+
+4.16 FINAL generation strategy
+
+You mentioned you can code PDF “Finalize” to print now; options:
+
+“Print to PDF” via a controlled PDF printer (can be automated but flaky)
+
+Use Adobe’s flatten/export pipeline (may require Acrobat, not Reader)
+
+Use a PDF library to flatten form fields (works if fields contain values)
+
+Dependency: decide what “FINAL” means technically (flattened, signed, etc.)
+
+Phase 5 — Auto-sorting & Folder Creation (Server scripts)
+
+Outcome: folders stay organized without users touching them.
+
+4.17 Server-side sorter
+
+Triggered by:
+
+new report creation
+
+finalize
+
+nightly cleanup
+
+Ensures:
+
+Customers\Customer\Unit folders exist
+
+naming conventions enforced
+
+orphaned/conflict files moved to correct places
+
+Updates DB canonical_path if moved
+
+Dependencies: report ID/canonical path conventions
+
+4.18 Orphan/conflict handling
+
+Any unexpected files go to Conflicts or Orphans
+
+Admin view lists conflicts needing reconciliation
+
+Dependencies: audit + admin tools
+
+Phase 6 — Quality-of-life Features (Optional but high value)
+
+Outcome: smoother day-to-day use, fewer mistakes.
+
+4.19 “My Checked Out” persistent reminder
+
+On app launch, show “My Checked Out” first
+
+Optional tray icon reminder while holding locks
+
+Dependencies: desktop app foundation
+
+4.20 Daily lock expiry policy (your earlier concept)
+
+You previously wanted 5pm/7am expiry. With no auto-save, the safe version is:
+
+At 4:50 PM: notify lockers “Return clipboards before 5:00”
+
+At 5:00 PM: auto-release locks (server-side)
+
+User can keep local work, but it’s no longer submit-able unless admin intervenes (or they re-checkout next day)
+This prevents overnight lockouts without risking data.
+
+Dependencies: notifications + server cron/scheduler
+
+4.21 Reporting dashboard
+
+Filter by:
+
+In Progress vs Done
+
+Customer
+
+Unit
+
+Who has checked out
+
+Useful for foreman/admin
+
+Dependencies: DB integrity
+
+5) Implementation Strategy and Dependencies Summary
+Hard dependencies (must exist first)
+
+Vault share + service account permissions
+
+DB schema
+
+Report Service basic endpoints
+
+Desktop app checkout/checkin loop
+
+Closed-file detection
+
+Next dependencies (unlock “admin override”)
+
+AD admin group lookup
+
+Notification mechanism
+
+Session override state tracking
+
+Next dependencies (unlock “Finalize”)
+
+A deterministic FINAL generation method
+
+Status management + filtering
+
+6) “Definition of Done” for the initial release (what to ship first)
+
+If you want fastest path to “paper clipboard replacement,” ship:
+
+✅ Checkout / Checkin with exclusive locks
+✅ My Checked Out list with persistent Check Back In
+✅ Closed-file enforcement
+✅ No-change detection
+✅ Basic admin override with warnings + email notification
+✅ Status: In Progress / Done (even if FINAL generation is manual at first)
+
+This gets you operational without waiting on perfect FINAL automation.
+
+7) Open Decisions List (to close before dev starts)
+
+These are the only “unknowns” that block implementation details:
+
+Notification channel: Email vs Windows tray agent vs both
+
+FINAL creation method: how do you technically generate an immutable PDF without Acrobat?
+
+User identity mapping: DOMAIN\user → email address (for notifications)
+
+Do users ever need offline work, or is LAN assumed?
+
+None of these require redesign; they’re configuration/implementation choices.
