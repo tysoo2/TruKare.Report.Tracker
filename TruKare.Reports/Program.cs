@@ -14,6 +14,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<VaultOptions>(builder.Configuration.GetSection("Vault"));
+builder.Services.Configure<LockPolicyOptions>(builder.Configuration.GetSection("LockPolicy"));
 builder.Services.PostConfigure<VaultOptions>(options =>
 {
     var baseVault = Path.Combine(builder.Environment.ContentRootPath, "Vault");
@@ -28,6 +29,7 @@ builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
 builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
+builder.Services.AddHostedService<LockPolicyBackgroundService>();
 
 var app = builder.Build();
 
