@@ -1,0 +1,6 @@
+@TruKare.Reports_HostAddress = http://localhost:5183
+
+GET {{TruKare.Reports_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
