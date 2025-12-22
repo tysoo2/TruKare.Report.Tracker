@@ -14,16 +14,19 @@ public class ReportVaultService : IReportVaultService
     private readonly VaultOptions _options;
     private readonly IHashService _hashService;
     private readonly INotificationService _notificationService;
+    private readonly IAdminAuthorizationService _adminAuthorizationService;
 
     public ReportVaultService(
         IReportRepository repository,
         IOptions<VaultOptions> options,
         IHashService hashService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IAdminAuthorizationService adminAuthorizationService)
     {
         _repository = repository;
         _hashService = hashService;
         _notificationService = notificationService;
+        _adminAuthorizationService = adminAuthorizationService;
         _options = options.Value;
     }
 
@@ -100,6 +103,8 @@ public class ReportVaultService : IReportVaultService
 
     public async Task<CheckoutResponse> OverrideCheckoutAsync(OverrideCheckoutRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
+        _adminAuthorizationService.EnsureAdmin();
+        request.AdminUser = _adminAuthorizationService.GetCurrentAdminUser();
         var report = _repository.GetReport(request.ReportId) ?? throw new InvalidOperationException("Report not found.");
         EnsureDirectories();
         EnsureCanonicalExists(report);
@@ -183,6 +188,8 @@ public class ReportVaultService : IReportVaultService
 
     public async Task FinalizeAsync(FinalizeRequest request, RequestUserContext userContext, CancellationToken cancellationToken)
     {
+        _adminAuthorizationService.EnsureAdmin();
+        request.User = _adminAuthorizationService.GetCurrentAdminUser();
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);

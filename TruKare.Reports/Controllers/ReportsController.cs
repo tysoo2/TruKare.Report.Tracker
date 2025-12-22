@@ -60,6 +60,7 @@ public class ReportsController : ControllerBase
     }
 
     [HttpPost("finalize")]
+    [RequireAdmin]
     public async Task<IActionResult> Finalize([FromBody] FinalizeRequest request, CancellationToken cancellationToken)
     {
         var userContext = _userContextAccessor.GetCurrentUser(HttpContext);
