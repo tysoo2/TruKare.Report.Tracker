@@ -8,8 +8,6 @@ public interface IReportRepository
 
     Report? GetReport(Guid id);
 
-    IEnumerable<ReportLock> GetLocks();
-
     void UpsertReport(Report report);
 
     ReportLock? GetLock(Guid reportId);

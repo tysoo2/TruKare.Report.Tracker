@@ -33,7 +33,6 @@ public class ReportVaultService : IReportVaultService
         _notificationService = notificationService;
         _adminAuthorizationService = adminAuthorizationService;
         _options = options.Value;
-        _userContext = userContext;
     }
 
     public IEnumerable<Report> SearchReports(SearchReportsRequest request)
@@ -64,7 +63,6 @@ public class ReportVaultService : IReportVaultService
         EnsureDirectories();
         EnsureCanonicalExists(report);
 
-        var currentUser = _userContext.GetCurrentUser();
         var existingLock = _repository.GetLock(report.ReportId);
         if (existingLock != null && existingLock.LockState == LockState.Active && !string.Equals(existingLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {
@@ -145,18 +143,6 @@ public class ReportVaultService : IReportVaultService
                           $"Override reason: {request.Reason}. " +
                           $"Conflict copy: {conflictCopyPath ?? "unavailable"}.";
 
-            var metadata = new Dictionary<string, string>
-            {
-                ["lockedBy"] = existingLock.LockedBy,
-                ["lockedAtUtc"] = existingLock.LockedAt.ToString("u"),
-                ["overrideReason"] = request.Reason
-            };
-
-            if (conflictCopyPath is not null)
-            {
-                metadata["conflictCopyPath"] = conflictCopyPath;
-            }
-
             var notifyMessage = $"Your lock on report {report.ReportType} for {report.CustomerName} was overridden by {userContext.UserName}. Reason: {request.Reason}";
             await _notificationService.NotifyAsync(existingLock.LockedBy, "Lock overridden", notifyMessage, cancellationToken);
             AppendAudit(report.ReportId, userContext.UserName, "OverrideCheckout", new { Host = userContext.Host, request.Reason, existingLock.LockedBy });
@@ -176,11 +162,10 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
-        var currentUser = _userContext.GetCurrentUser();
 
         if (session.IsOverridden || (reportLock?.LockState == LockState.Overridden && !string.Equals(reportLock.OverriddenBy, userContext.UserName, StringComparison.OrdinalIgnoreCase)))
         {
-            await PreserveConflictCopyAsync(session, report, cancellationToken);
+            _ = await PreserveConflictCopyAsync(session, report, cancellationToken);
             throw new InvalidOperationException($"This report was overridden by {reportLock?.OverriddenBy}. Your copy is stale.");
         }
 
@@ -220,7 +205,6 @@ public class ReportVaultService : IReportVaultService
         var session = _repository.GetSession(request.SessionId) ?? throw new InvalidOperationException("Session not found.");
         var report = _repository.GetReport(session.ReportId) ?? throw new InvalidOperationException("Report not found.");
         var reportLock = _repository.GetLock(report.ReportId);
-        var currentUser = _userContext.GetCurrentUser();
 
         if (reportLock == null || reportLock.LockState != LockState.Active || !string.Equals(reportLock.LockedBy, userContext.UserName, StringComparison.OrdinalIgnoreCase))
         {
@@ -244,7 +228,7 @@ public class ReportVaultService : IReportVaultService
         report.LastModifiedAt = DateTime.UtcNow;
         report.LastModifiedBy = userContext.UserName;
         _repository.UpsertReport(report);
-        AppendAudit(report.ReportId, userContext.UserName, "Finalize", new { finalPath });
+        AppendAudit(report.ReportId, userContext.UserName, "Finalize", new { finalPath, finalizationMode });
     }
 
     public IEnumerable<AuditEvent> GetAuditTrail(Guid reportId) => _repository.GetAudits(reportId);
@@ -319,6 +303,51 @@ public class ReportVaultService : IReportVaultService
     public IEnumerable<FileIssueSummary> GetConflicts() => GetFileIssues(_options.ConflictsRoot, "Conflict");
 
     public IEnumerable<FileIssueSummary> GetOrphans() => GetFileIssues(_options.OrphansRoot, "Orphan");
+
+    private IEnumerable<FileIssueSummary> GetFileIssues(string root, string category)
+    {
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return Array.Empty<FileIssueSummary>();
+        }
+
+        return Directory
+            .EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Select(path =>
+            {
+                var info = new FileInfo(path);
+                var relativePath = Path.GetRelativePath(root, path);
+                var (user, reportId) = ParseUserAndReport(relativePath);
+
+                return new FileIssueSummary
+                {
+                    Category = category,
+                    FileName = info.Name,
+                    FullPath = path,
+                    RelativePath = relativePath,
+                    SizeBytes = info.Length,
+                    LastModifiedAt = info.LastWriteTimeUtc,
+                    User = user,
+                    ReportId = reportId
+                };
+            })
+            .OrderByDescending(issue => issue.LastModifiedAt)
+            .ThenBy(issue => issue.FileName)
+            .ToArray();
+    }
+
+    private static (string? User, Guid? ReportId) ParseUserAndReport(string relativePath)
+    {
+        var segments = relativePath
+            .Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries);
+
+        if (segments.Length >= 2 && Guid.TryParse(segments[1], out var reportId))
+        {
+            return (segments[0], reportId);
+        }
+
+        return (null, null);
+    }
 
     private void EnsureDirectories()
     {
@@ -424,7 +453,7 @@ public class ReportVaultService : IReportVaultService
         }
     }
 
-    private async Task PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
+    private async Task<string?> PreserveConflictCopyAsync(CheckoutSession session, Report report, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.ConflictsRoot) || !File.Exists(session.LocalPath))
         {
@@ -437,6 +466,7 @@ public class ReportVaultService : IReportVaultService
         var conflictPath = Path.Combine(conflictFolder, conflictName);
         File.Copy(session.LocalPath, conflictPath, overwrite: true);
         await _notificationService.NotifyAsync(session.User, "Stale copy quarantined", $"A stale copy was preserved at {conflictPath}", cancellationToken);
+        return conflictPath;
     }
 
     private void AppendAudit(Guid reportId, string actor, string action, object details)

@@ -23,8 +23,6 @@ public class InMemoryReportRepository : IReportRepository
 
     public ReportLock? GetLock(Guid reportId) => _locks.TryGetValue(reportId, out var reportLock) ? reportLock : null;
 
-    public IEnumerable<ReportLock> GetLocks() => _locks.Values;
-
     public void SaveLock(ReportLock? reportLock)
     {
         if (reportLock == null)

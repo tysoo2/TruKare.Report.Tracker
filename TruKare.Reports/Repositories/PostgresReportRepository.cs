@@ -41,6 +41,21 @@ public class PostgresReportRepository : IReportRepository
         return reader.Read() ? MapReport(reader) : null;
     }
 
+    public IEnumerable<ReportLock> GetLocks()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT * FROM report_locks";
+        using var reader = command.ExecuteReader();
+        var locks = new List<ReportLock>();
+        while (reader.Read())
+        {
+            locks.Add(MapLock(reader));
+        }
+
+        return locks;
+    }
+
     public void UpsertReport(Report report)
     {
         using var connection = Open();

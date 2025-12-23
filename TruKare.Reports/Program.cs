@@ -31,6 +31,9 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth")
 builder.Services.AddScoped<IAdminGroupValidator, WindowsAdminGroupValidator>();
 builder.Services.AddScoped<IUserContextAccessor, HttpContextUserContextAccessor>();
 builder.Services.AddHttpContextAccessor();
+builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notifications"));
+builder.Services.AddSingleton<IUserDirectoryService, ConfigurationUserDirectoryService>();
+builder.Services.AddHttpClient<TeamsNotificationService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -50,9 +53,16 @@ builder.Services.PostConfigure<VaultOptions>(options =>
     options.IntakeRoot = string.IsNullOrWhiteSpace(options.IntakeRoot) ? Path.Combine(baseVault, "Intake") : options.IntakeRoot;
     options.WorkspaceRoot = string.IsNullOrWhiteSpace(options.WorkspaceRoot) ? Path.Combine(baseVault, "Workspace") : options.WorkspaceRoot;
 });
-builder.Services.AddSingleton<IReportRepository, PostgresReportRepository>();
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    builder.Services.AddSingleton<IReportRepository, InMemoryReportRepository>();
+}
+else
+{
+    builder.Services.AddSingleton<IReportRepository, PostgresReportRepository>();
+}
 builder.Services.AddSingleton<IHashService, Sha256HashService>();
-builder.Services.AddSingleton<INotificationService, ConsoleNotificationService>();
+builder.Services.AddSingleton<INotificationService, FanOutNotificationService>();
 builder.Services.AddSingleton<IAdminAuthorizationService, AdminAuthorizationService>();
 builder.Services.AddSingleton<IReportVaultService, ReportVaultService>();
 builder.Services.AddHostedService<LockPolicyBackgroundService>();
