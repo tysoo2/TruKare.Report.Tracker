@@ -8,7 +8,20 @@ public class FanOutNotificationService : INotificationService
     private static readonly NotificationChannel[] DefaultChannels =
         { NotificationChannel.Email, NotificationChannel.Teams, NotificationChannel.DesktopToast };
 
-    public Task NotifyAsync(NotificationRequest request, CancellationToken cancellationToken)
+    public Task NotifyAsync(string user, string subject, string message, CancellationToken cancellationToken)
+    {
+        var request = new NotificationRequest
+        {
+            User = user,
+            Subject = subject,
+            Message = message,
+            Channels = DefaultChannels
+        };
+
+        return NotifyAsyncInternal(request);
+    }
+
+    private Task NotifyAsyncInternal(NotificationRequest request)
     {
         Outgoing.Enqueue(request);
 

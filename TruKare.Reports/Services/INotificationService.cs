@@ -2,5 +2,5 @@ namespace TruKare.Reports.Services;
 
 public interface INotificationService
 {
-    Task NotifyAsync(NotificationRequest request, CancellationToken cancellationToken);
+    Task NotifyAsync(string user, string subject, string message, CancellationToken cancellationToken);
 }
