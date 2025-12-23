@@ -1,4 +1,6 @@
+using System;
 using System.Diagnostics;
+using System.IO;
 using TruKare.Reports.Desktop.ViewModels;
 
 namespace TruKare.Reports.Desktop.Services;
@@ -17,9 +19,11 @@ public class WorkspaceService
     {
         var directory = Path.Combine(WorkspaceRoot, session.ReportId.ToString());
         Directory.CreateDirectory(directory);
+
         var fileName = !string.IsNullOrWhiteSpace(remotePath)
             ? Path.GetFileName(remotePath)
             : $"{session.ReportId}.pdf";
+
         var localPath = Path.Combine(directory, fileName);
 
         if (!string.IsNullOrWhiteSpace(remotePath) && File.Exists(remotePath))
@@ -28,7 +32,8 @@ public class WorkspaceService
         }
         else if (!File.Exists(localPath))
         {
-            File.WriteAllText(localPath, $"Placeholder for {session.ReportName}. Replace with the synced PDF if needed.");
+            File.WriteAllText(localPath,
+                $"Placeholder for {session.ReportName}. Replace with the synced PDF if needed.");
         }
 
         return localPath;
@@ -38,7 +43,7 @@ public class WorkspaceService
     {
         try
         {
-            using var stream = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var _ = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         }
         catch (IOException ex)
         {

@@ -7,6 +7,8 @@ using TruKare.Reports.Middleware;
 using TruKare.Reports.Options;
 using TruKare.Reports.Repositories;
 using TruKare.Reports.Services;
+using TruKare.Reports.Data;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,7 +39,6 @@ builder.Services.AddHttpClient<TeamsNotificationService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<VaultOptions>(builder.Configuration.GetSection("Vault"));
@@ -79,7 +80,6 @@ if (!string.IsNullOrWhiteSpace(connectionString))
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
     app.UseSwaggerUI();
     app.UseSwagger();
 

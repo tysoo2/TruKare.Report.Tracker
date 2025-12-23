@@ -1,6 +1,10 @@
+using System;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using TruKare.Reports.Desktop.Models;
 
 namespace TruKare.Reports.Desktop.Api;
@@ -9,21 +13,34 @@ public class ReportApiClient
 {
     private readonly JsonSerializerOptions _serializerOptions = new(JsonSerializerDefaults.Web);
 
-    public async Task<IReadOnlyList<ReportDto>> SearchReportsAsync(string apiBase, SearchReportsRequestDto request, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<ReportDto>> SearchReportsAsync(
+        string apiBase,
+        SearchReportsRequestDto request,
+        CancellationToken cancellationToken)
     {
         using var httpClient = CreateClient(apiBase);
+
         var query = BuildQueryString(request);
         var response = await httpClient.GetAsync($"/reports{query}", cancellationToken);
+
         await EnsureSuccessAsync(response);
+
         var payload = await response.Content.ReadFromJsonAsync<List<ReportDto>>(_serializerOptions, cancellationToken);
-        return payload ?? Array.Empty<ReportDto>();
+
+        // payload is List<ReportDto>, Array.Empty<ReportDto>() is ReportDto[] -> can't use ?? directly
+        return payload is null ? Array.Empty<ReportDto>() : payload;
     }
 
-    public async Task<ReportStatusResponseDto> GetStatusAsync(string apiBase, Guid reportId, CancellationToken cancellationToken)
+    public async Task<ReportStatusResponseDto> GetStatusAsync(
+        string apiBase,
+        Guid reportId,
+        CancellationToken cancellationToken)
     {
         using var httpClient = CreateClient(apiBase);
+
         var response = await httpClient.GetAsync($"/reports/{reportId}/status", cancellationToken);
         await EnsureSuccessAsync(response);
+
         var payload = await response.Content.ReadFromJsonAsync<ReportStatusResponseDto>(_serializerOptions, cancellationToken);
         if (payload == null)
         {
@@ -33,11 +50,16 @@ public class ReportApiClient
         return payload;
     }
 
-    public async Task<CheckoutResponseDto> CheckoutAsync(string apiBase, CheckoutRequestDto request, CancellationToken cancellationToken)
+    public async Task<CheckoutResponseDto> CheckoutAsync(
+        string apiBase,
+        CheckoutRequestDto request,
+        CancellationToken cancellationToken)
     {
         using var httpClient = CreateClient(apiBase);
+
         var response = await httpClient.PostAsJsonAsync("/reports/checkout", request, _serializerOptions, cancellationToken);
         await EnsureSuccessAsync(response);
+
         var payload = await response.Content.ReadFromJsonAsync<CheckoutResponseDto>(_serializerOptions, cancellationToken);
         if (payload == null)
         {
@@ -50,6 +72,7 @@ public class ReportApiClient
     public async Task CheckinAsync(string apiBase, CheckinRequestDto request, CancellationToken cancellationToken)
     {
         using var httpClient = CreateClient(apiBase);
+
         var response = await httpClient.PostAsJsonAsync("/reports/checkin", request, _serializerOptions, cancellationToken);
         await EnsureSuccessAsync(response);
     }
@@ -78,12 +101,14 @@ public class ReportApiClient
         var message = string.IsNullOrWhiteSpace(body)
             ? response.ReasonPhrase
             : body;
+
         throw new InvalidOperationException($"API call failed ({response.StatusCode}): {message}");
     }
 
     private static string BuildQueryString(SearchReportsRequestDto request)
     {
         var builder = new StringBuilder("?");
+
         void Append(string name, string value)
         {
             if (builder.Length > 1)
@@ -112,6 +137,7 @@ public class ReportApiClient
         }
 
         Append("includeArchived", request.IncludeArchived.ToString());
+
         return builder.Length > 1 ? builder.ToString() : string.Empty;
     }
 }

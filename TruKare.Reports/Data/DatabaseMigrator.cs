@@ -17,7 +17,9 @@ public static class DatabaseMigrator
 
         var upgrader = DeployChanges.To
             .PostgresqlDatabase(connectionString)
-            .WithScriptsEmbeddedInAssembly(Assembly.GetExecutingAssembly(), scriptName => scriptName.Contains(".Migrations."))
+            .WithScriptsEmbeddedInAssembly(
+                Assembly.GetExecutingAssembly(),
+                scriptName => scriptName.Contains(".Migrations."))
             .LogTo(new DbUpToILogger(logger))
             .WithTransaction()
             .Build();
@@ -32,28 +34,55 @@ public static class DatabaseMigrator
         logger.LogInformation("Database migrations applied successfully.");
     }
 
+    /// <summary>
+    /// Adapter from DbUp's IUpgradeLog to Microsoft.Extensions.Logging.ILogger.
+    /// Matches newer DbUp versions that require Log* methods.
+    /// </summary>
     private sealed class DbUpToILogger : IUpgradeLog
     {
         private readonly ILogger _logger;
 
-        public DbUpToILogger(ILogger logger)
-        {
-            _logger = logger;
-        }
+        public DbUpToILogger(ILogger logger) => _logger = logger;
 
-        public void WriteError(string format, params object[] args)
-        {
-            _logger.LogError(format, args);
-        }
+        public void LogTrace(string format, params object[] args)
+            => LogSafely(LogLevel.Trace, null, format, args);
 
-        public void WriteInformation(string format, params object[] args)
-        {
-            _logger.LogInformation(format, args);
-        }
+        public void LogDebug(string format, params object[] args)
+            => LogSafely(LogLevel.Debug, null, format, args);
 
-        public void WriteWarning(string format, params object[] args)
+        public void LogInformation(string format, params object[] args)
+            => LogSafely(LogLevel.Information, null, format, args);
+
+        public void LogWarning(string format, params object[] args)
+            => LogSafely(LogLevel.Warning, null, format, args);
+
+        public void LogError(string format, params object[] args)
+            => LogSafely(LogLevel.Error, null, format, args);
+
+        public void LogError(Exception exception, string format, params object[] args)
+            => LogSafely(LogLevel.Error, exception, format, args);
+
+        /// <summary>
+        /// DbUp provides "format + args" where the "format" is often already formatted text,
+        /// and may contain braces. Logging frameworks treat braces as templates.
+        /// This helper avoids template issues by formatting first when args are provided.
+        /// </summary>
+        private void LogSafely(LogLevel level, Exception? ex, string format, object[] args)
         {
-            _logger.LogWarning(format, args);
+            // If args exist, treat "format" as a .NET format string.
+            // If no args, log the message as plain text (not a template).
+            var message = (args is { Length: > 0 })
+                ? string.Format(format, args)
+                : format;
+
+            if (ex is null)
+            {
+                _logger.Log(level, "{Message}", message);
+            }
+            else
+            {
+                _logger.Log(level, ex, "{Message}", message);
+            }
         }
     }
 }
