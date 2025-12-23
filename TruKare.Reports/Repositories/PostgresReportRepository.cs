@@ -344,7 +344,7 @@ public class PostgresReportRepository : IReportRepository
                 report_id uuid NOT NULL REFERENCES reports(report_id),
                 details text NOT NULL
             );
-        "";
+        ";
         command.ExecuteNonQuery();
     }
 
@@ -359,7 +359,7 @@ public class PostgresReportRepository : IReportRepository
     {
         return new Report
         {
-            ReportId = record.GetFieldValue<Guid>(record.GetOrdinal("report_id")),
+            ReportId = record.GetGuid(record.GetOrdinal("report_id")),
             CustomerName = record.GetString(record.GetOrdinal("customer_name")),
             UnitNumber = record.GetString(record.GetOrdinal("unit_number")),
             ReportType = record.GetString(record.GetOrdinal("report_type")),
@@ -378,7 +378,7 @@ public class PostgresReportRepository : IReportRepository
     {
         return new ReportLock
         {
-            ReportId = record.GetFieldValue<Guid>(record.GetOrdinal("report_id")),
+            ReportId = record.GetGuid(record.GetOrdinal("report_id")),
             LockedBy = record.GetString(record.GetOrdinal("locked_by")),
             LockedAt = record.GetDateTime(record.GetOrdinal("locked_at")),
             LockedFromHost = record.GetString(record.GetOrdinal("locked_from_host")),
@@ -393,8 +393,8 @@ public class PostgresReportRepository : IReportRepository
     {
         return new CheckoutSession
         {
-            SessionId = record.GetFieldValue<Guid>(record.GetOrdinal("session_id")),
-            ReportId = record.GetFieldValue<Guid>(record.GetOrdinal("report_id")),
+            SessionId = record.GetGuid(record.GetOrdinal("session_id")),
+            ReportId = record.GetGuid(record.GetOrdinal("report_id")),
             User = record.GetString(record.GetOrdinal("user_name")),
             LocalPath = record.GetString(record.GetOrdinal("local_path")),
             BaseHash = record.GetString(record.GetOrdinal("base_hash")),
@@ -412,7 +412,7 @@ public class PostgresReportRepository : IReportRepository
             Timestamp = record.GetDateTime(record.GetOrdinal("timestamp")),
             Actor = record.GetString(record.GetOrdinal("actor")),
             Action = record.GetString(record.GetOrdinal("action")),
-            ReportId = record.GetFieldValue<Guid>(record.GetOrdinal("report_id")),
+            ReportId = record.GetGuid(record.GetOrdinal("report_id")),
             Details = record.GetString(record.GetOrdinal("details"))
         };
     }
