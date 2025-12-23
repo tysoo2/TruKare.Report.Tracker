@@ -5,13 +5,16 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="TruKare Reports Desktop"
+        Icon="pack://application:,,,/TruKare.Reports.Desktop;component/Resources/Pictures/favicon-32x32.png"
         Height="720" Width="1200">
+
     <Window.Resources>
         <Style x:Key="BannerStyle" TargetType="Border">
-            <Setter Property="Background" Value="#FF1F2937"/>
+            <!-- Default banner uses Tru-Kare blue -->
+            <Setter Property="Background" Value="#FF0055CC"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding BannerSeverity}" Value="Error">
-                    <Setter Property="Background" Value="#FF991B1B"/>
+                    <Setter Property="Background" Value="#FFDC2626"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding BannerSeverity}" Value="Success">
                     <Setter Property="Background" Value="#FF065F46"/>
@@ -19,17 +22,74 @@
             </Style.Triggers>
         </Style>
     </Window.Resources>
+
     <DockPanel>
-        <Border DockPanel.Dock="Top" Background="#FF111827" Padding="12">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="API Base" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox Width="240" Text="{Binding ApiBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
-                <TextBlock Text="User" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox Width="160" Text="{Binding CurrentUser, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
-                <TextBlock Text="Host" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                <TextBox Width="160" Text="{Binding HostName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
-                <Button Content="Refresh Statuses" Command="{Binding RefreshStatusesCommand}" Margin="12,0,0,0"/>
-            </StackPanel>
+        <!-- Header -->
+        <Border DockPanel.Dock="Top"
+                Background="White"
+                Padding="10"
+                BorderBrush="#FFE5E7EB"
+                BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Row 0: Logo + Name -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- Wider logo container for a horizontal logo -->
+                    <Border Width="220"
+                            Height="60"
+                            CornerRadius="8"
+                            Background="White"
+                            BorderBrush="#FF0055CC"
+                            BorderThickness="1"
+                            VerticalAlignment="Center">
+                        <Image Source="pack://application:,,,/TruKare.Reports.Desktop;component/Resources/Pictures/Tru-Kare Logo with Faded Arch.jpg"
+                               Stretch="Uniform"
+                               Margin="6"/>
+                    </Border>
+
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Tru-Kare Report Center"
+                                   FontSize="20"
+                                   FontWeight="SemiBold"
+                                   Foreground="#FF0055CC"/>
+                        <TextBlock Text="Report checkout | locking | finalize"
+                                   FontSize="12"
+                                   Foreground="#FF6B7280"/>
+                    </StackPanel>
+
+                    <!-- Small red accent -->
+                    <Border Margin="14,0,0,0"
+                            Width="6"
+                            Height="34"
+                            Background="#FFDC2626"
+                            CornerRadius="3"
+                            VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <!-- Row 1: API/User/Host row (same bindings as before) -->
+                <WrapPanel Grid.Row="1" Margin="0,10,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="API Base" Foreground="#FF111827" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox Width="240" Text="{Binding ApiBaseUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+
+                    <TextBlock Text="User" Foreground="#FF111827" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox Width="160" Text="{Binding CurrentUser, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+
+                    <TextBlock Text="Host" Foreground="#FF111827" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <TextBox Width="160" Text="{Binding HostName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,12,0"/>
+
+                    <Button Content="Refresh Statuses"
+                            Command="{Binding RefreshStatusesCommand}"
+                            Margin="12,0,0,0"
+                            Padding="14,6"
+                            Background="#FF0055CC"
+                            Foreground="White"
+                            BorderThickness="0"/>
+                </WrapPanel>
+            </Grid>
         </Border>
 
         <TabControl DockPanel.Dock="Top">
@@ -88,6 +148,7 @@
                     </Border>
                 </Grid>
             </TabItem>
+
             <TabItem Header="My Checked Out">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
